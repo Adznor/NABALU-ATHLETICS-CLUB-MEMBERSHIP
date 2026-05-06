@@ -1,0 +1,72 @@
+{
+  "entities": {
+    "Member": {
+      "title": "Member",
+      "description": "Athlete or Individual member of Nabalu Athletics Club",
+      "type": "object",
+      "properties": {
+        "fullName": { "type": "string" },
+        "icNumber": { "type": "string" },
+        "dob": { "type": "string" },
+        "gender": { "type": "string", "enum": ["Lelaki", "Perempuan"] },
+        "address": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "guardianName": { "type": "string" },
+        "guardianPhone": { "type": "string" },
+        "membershipType": { "type": "string", "enum": ["Ahli Individu", "Ahli Remaja"] },
+        "isOku": { "type": "boolean", "description": "OKU status" },
+        "photoBase64": { "type": "string", "description": "Mug shot" },
+        "receiptBase64": { "type": "string", "description": "Payment receipt" },
+        "membershipId": { "type": "string", "description": "Generated after verification" },
+        "status": { "type": "string", "enum": ["pending", "verified", "expired", "cancelled"] },
+        "cancellationReason": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Tarikh Permohonan" },
+        "verifiedAt": { "type": "string", "format": "date-time", "description": "Tarikh Disahkan" },
+        "cancelledAt": { "type": "string", "format": "date-time", "description": "Tarikh Dibatalkan" },
+        "expiryDate": { "type": "string", "format": "date-time", "description": "Tarikh Tamat Tempoh" },
+        "membershipNumber": { "type": "number", "description": "Sequence number for NAC001 format" }
+      },
+      "required": ["fullName", "icNumber", "membershipType", "status", "createdAt"]
+    },
+    "Counter": {
+      "title": "Counter",
+      "description": "Counter for auto-incrementing membership IDs",
+      "type": "object",
+      "properties": {
+        "count": { "type": "number" }
+      }
+    },
+    "AppSetting": {
+      "title": "AppSetting",
+      "description": "Club settings and content",
+      "type": "object",
+      "properties": {
+        "clubName": { "type": "string" },
+        "clubNameEn": { "type": "string" },
+        "mission": { "type": "string" },
+        "missionEn": { "type": "string" },
+        "vision": { "type": "string" },
+        "visionEn": { "type": "string" },
+        "logoUrl": { "type": "string" },
+        "terms": { "type": "string" },
+        "termsPdfUrl": { "type": "string" },
+        "bankInfo": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "/members/{memberId}": {
+      "schema": "Member",
+      "description": "Members collection"
+    },
+    "/counters/members": {
+      "schema": "Counter",
+      "description": "Global counter for membership IDs"
+    },
+    "/settings/club": {
+      "schema": "AppSetting",
+      "description": "Club configuration"
+    }
+  }
+}

@@ -1,0 +1,455 @@
+import React, { useState, useEffect } from 'react';
+import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { collection, addDoc, serverTimestamp, runTransaction, doc, getDoc } from 'firebase/firestore';
+import { motion, AnimatePresence } from 'motion/react';
+import { CheckCircle, Upload, Loader2, Info } from 'lucide-react';
+import { Member, MembershipType } from '../types';
+
+export default function RegistrationForm({ settings, lang }: { settings: any, lang: 'bm' | 'en' }) {
+  const [membershipType, setMembershipType] = useState<MembershipType>('Ahli Individu');
+  const [formData, setFormData] = useState<Partial<Member>>({
+    gender: 'Lelaki',
+    membershipType: 'Ahli Individu',
+    isOku: false,
+    status: 'pending',
+    dob: '',
+    phone: '',
+    email: '',
+    address: '',
+    icNumber: '',
+    fullName: '',
+  });
+
+  const t = {
+    bm: {
+      title: "Borang Permohonan",
+      clubName: "Nabalu Athletics Club",
+      membershipType: "1. Jenis Keahlian",
+      personalDetails: "2. Butiran Peribadi",
+      fullName: "Nama Penuh (Seperti dalam Kad Pengenalan)",
+      icNumber: "No. KP",
+      dob: "Tarikh Lahir",
+      gender: "Jantina",
+      phone: "No. Telefon",
+      email: "Email",
+      address: "Alamat Tetap / Sekolah",
+      guardianTitle: "Maklumat Penjaga (Wajib untuk Ahli Remaja)",
+      guardianName: "Nama Penjaga",
+      guardianPhone: "No. Telefon Penjaga",
+      documents: "3. Dokumen",
+      photoLabel: "Gambar Profil",
+      receiptLabel: "Resit Pembayaran",
+      photoHint: "(Optional)",
+      receiptHint: "(Optional)",
+      bankHint: "Sila pastikan pembayaran dilakukan ke:",
+      termsTitle: "Terma & Syarat",
+      termsLink: "Klik untuk baca Terma & Syarat Keahlian",
+      termsAgree: "Saya setuju dengan segala terma & syarat.",
+      submitBtn: "Hantar Permohonan",
+      successTitle: "Terima Kasih!",
+      successMsg: "Permohonan anda telah diterima. Pihak kelab akan melakukan pengesahan dalam masa terdekat.",
+      successIdLabel: "Nombor Keahlian Anda",
+      backHome: "Kembali ke Laman Utama",
+      loading: "Sila tunggu...",
+      termsError: "Sila baca dan setuju dengan terma dan syarat.",
+      submitError: "Gagal menghantar permohonan. Sila cuba lagi.",
+      delete: "Padam",
+      mandatory: "(Wajib)",
+      okuLabel: "Status OKU",
+      okuYes: "YA (Orang Kurang Upaya)",
+      okuNo: "TIDAK",
+    },
+    en: {
+      title: "Application Form",
+      clubName: "Nabalu Athletics Club",
+      membershipType: "1. Membership Type",
+      personalDetails: "2. Personal Details",
+      fullName: "Full Name (As in Identity Card)",
+      icNumber: "ID Number (KP)",
+      dob: "Date of Birth",
+      gender: "Gender",
+      phone: "Phone Number",
+      email: "Email",
+      address: "Permanent Address / School",
+      guardianTitle: "Guardian Information (Mandatory for Youth Members)",
+      guardianName: "Guardian Name",
+      guardianPhone: "Guardian Phone",
+      documents: "3. Documents",
+      photoLabel: "Profile Picture",
+      receiptLabel: "Payment Receipt",
+      photoHint: "(Optional)",
+      receiptHint: "(Optional)",
+      bankHint: "Please ensure payment is made to:",
+      termsTitle: "Terms & Conditions",
+      termsLink: "Click to read Membership Terms & Conditions",
+      termsAgree: "I agree to all terms and conditions.",
+      submitBtn: "Submit Application",
+      successTitle: "Thank You!",
+      successMsg: "Your application has been received. The club will verify it soon.",
+      successIdLabel: "Your Membership Number",
+      backHome: "Back to Home",
+      loading: "Please wait...",
+      termsError: "Please read and agree to the terms and conditions.",
+      submitError: "Failed to submit application. Please try again.",
+      delete: "Delete",
+      mandatory: "(Mandatory)",
+      okuLabel: "Status OKU",
+      okuYes: "YA (Orang Kurang Upaya)",
+      okuNo: "TIDAK",
+    }
+  };
+
+  const current = t[lang];
+
+  const handleICChange = (ic: string) => {
+    // Only proceed if it looks like a valid IC start (YYMMDD)
+    const cleanIC = ic.replace(/[^0-9]/g, '');
+    let newDOB = formData.dob || '';
+    let newGender = formData.gender || 'Lelaki';
+
+    if (cleanIC.length >= 6) {
+      const yy = parseInt(cleanIC.substring(0, 2));
+      const mm = cleanIC.substring(2, 4);
+      const dd = cleanIC.substring(4, 6);
+      
+      const currentYearShort = new Date().getFullYear() % 100;
+      const century = yy > currentYearShort ? '19' : '20';
+      
+      // Basic validation for month and day
+      const month = parseInt(mm);
+      const day = parseInt(dd);
+      
+      if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+        newDOB = `${century}${yy}-${mm}-${dd}`;
+      }
+    }
+
+    // Suggested Gender Logic based on the last digit
+    if (cleanIC.length > 0) {
+      const lastDigit = parseInt(cleanIC.charAt(cleanIC.length - 1));
+      newGender = lastDigit % 2 === 0 ? 'Perempuan' : 'Lelaki';
+    }
+
+    setFormData({ ...formData, icNumber: ic, dob: newDOB, gender: newGender as any });
+  };
+  const [files, setFiles] = useState<{ photo?: File; receipt?: File }>({});
+  const [previews, setPreviews] = useState<{ photo?: string; receipt?: string }>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [successId, setSuccessId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, key: string) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 200 * 1024) {
+        alert("Gambar terlalu besar. Sila muat naik gambar di bawah 200KB.");
+        return;
+      }
+      setFiles(prev => ({ ...prev, [key]: file }));
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setPreviews(prev => ({ ...prev, [key]: reader.result as string }));
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!acceptedTerms) {
+      setError("Sila baca dan setuju dengan terma dan syarat.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError(null);
+
+    try {
+      const newMember: Partial<Member> = {
+        ...formData,
+        membershipType,
+        photoBase64: previews.photo || '',
+        receiptBase64: previews.receipt || '',
+        status: 'pending',
+        createdAt: serverTimestamp(),
+      };
+
+      await addDoc(collection(db, 'members'), newMember);
+      setSuccessId('PENDING'); // Just a flag to show success UI
+      window.scrollTo(0, 0);
+    } catch (err: any) {
+      handleFirestoreError(err, OperationType.WRITE, 'members');
+      setError("Gagal menghantar pendaftaran. Sila cuba lagi.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  if (successId) {
+    return (
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="max-w-md mx-auto bg-white p-8 rounded-3xl shadow-xl text-center border-2 border-turquoise"
+      >
+        <div className="flex justify-center mb-6">
+          <div className="bg-turquoise/20 p-4 rounded-full">
+            <CheckCircle className="w-16 h-16 text-turquoise" />
+          </div>
+        </div>
+        <h2 className="text-3xl font-bold text-gray-800 mb-4">{current.successTitle}</h2>
+        <p className="text-gray-600 mb-8 leading-relaxed">
+          {current.successMsg}
+        </p>
+        <div className="bg-gray-50 p-6 rounded-2xl mb-8">
+          <p className="text-[10px] font-black text-turquoise-dark uppercase tracking-[0.2em]">PERMOHONAN BAHARU</p>
+          <p className="text-xs text-gray-400 mt-2 italic">Permohonan anda sedang diproses</p>
+        </div>
+        <button 
+          onClick={() => window.location.reload()}
+          className="w-full bg-turquoise hover:bg-turquoise-dark text-white font-bold py-4 rounded-xl transition-all shadow-lg hover:shadow-turquoise/30"
+        >
+          {current.backHome}
+        </button>
+      </motion.div>
+    );
+  }
+
+  return (
+    <div className="max-w-4xl mx-auto px-4 py-8">
+      <div className="mb-12">
+        <h2 className="text-4xl font-black text-slate-800 tracking-tighter italic">{current.title}</h2>
+        <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest">{current.clubName}</p>
+      </div>
+
+      <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-12 gap-4">
+        {/* Membership Type Selection */}
+        <section className="md:col-span-12 bento-card">
+          <h3 className="text-sm font-black text-slate-800 uppercase mb-6 tracking-wider flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-turquoise"></span> {current.membershipType}
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <button
+              type="button"
+              onClick={() => { setMembershipType('Ahli Individu'); setFormData({...formData, membershipType: 'Ahli Individu'}) }}
+              className={`p-6 rounded-2xl border-2 transition-all text-left ${
+                membershipType === 'Ahli Individu' 
+                ? 'border-turquoise bg-turquoise/5 shadow-inner' 
+                : 'border-slate-50 hover:border-turquoise/20'
+              }`}
+            >
+              <p className="font-black text-base text-slate-800 uppercase tracking-tighter">Ahli Individu</p>
+              <p className="text-[10px] font-bold text-slate-500 mt-2 leading-tight">Terbuka kepada orang awam, ibu, bapa atau penjaga ahli remaja.</p>
+              <div className="mt-4 pt-4 border-t border-slate-100">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Yuran Keahlian: RM50</p>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Yuran Tahunan: RM50</p>
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => { setMembershipType('Ahli Remaja'); setFormData({...formData, membershipType: 'Ahli Remaja'}) }}
+              className={`p-6 rounded-2xl border-2 transition-all text-left ${
+                membershipType === 'Ahli Remaja' 
+                ? 'border-turquoise bg-turquoise/5 shadow-inner' 
+                : 'border-slate-50 hover:border-turquoise/20'
+              }`}
+            >
+              <p className="font-black text-base text-slate-800 uppercase tracking-tighter">Ahli Remaja</p>
+              <p className="text-[10px] font-bold text-slate-500 mt-2 leading-tight">Terbuka kepada semua atlet 18 tahun ke bawah.</p>
+              <div className="mt-4 pt-4 border-t border-slate-100">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Yuran Keahlian: RM5</p>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Yuran Tahunan: RM10</p>
+              </div>
+            </button>
+          </div>
+
+          <div className="mt-8 pt-8 border-t border-slate-50">
+            <label className="label-bento mb-4">{current.okuLabel}</label>
+            <div className="grid grid-cols-2 gap-4">
+              <button
+                type="button"
+                onClick={() => setFormData({ ...formData, isOku: true })}
+                className={`flex items-center justify-center p-4 rounded-xl border-2 font-black text-[10px] tracking-widest transition-all ${formData.isOku ? 'border-purple-500 bg-purple-50 text-purple-600' : 'border-slate-50 text-slate-400'}`}
+              >
+                {current.okuYes}
+              </button>
+              <button
+                type="button"
+                onClick={() => setFormData({ ...formData, isOku: false })}
+                className={`flex items-center justify-center p-4 rounded-xl border-2 font-black text-[10px] tracking-widest transition-all ${!formData.isOku ? 'border-turquoise bg-turquoise/5 text-turquoise' : 'border-slate-50 text-slate-400'}`}
+              >
+                {current.okuNo}
+              </button>
+            </div>
+            {formData.isOku && (
+              <p className="mt-3 text-[9px] font-black text-purple-500 uppercase tracking-widest animate-pulse flex items-center gap-2">
+                <Info className="w-3 h-3" /> Yuran Keahlian & Tahunan: PERCUMA UNTUK OKU
+              </p>
+            )}
+          </div>
+        </section>
+
+        {/* Personal Details */}
+        <section className="md:col-span-8 bento-card">
+          <h3 className="text-sm font-black text-slate-800 uppercase mb-8 tracking-wider flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-turquoise"></span> {current.personalDetails}
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="md:col-span-2">
+              <label className="label-bento">{current.fullName}</label>
+              <input required type="text" className="input-bento" placeholder="..." value={formData.fullName} onChange={(e) => setFormData({ ...formData, fullName: e.target.value })} />
+            </div>
+            <div>
+              <label className="label-bento">{current.icNumber}</label>
+              <input required type="text" className="input-bento" placeholder="000101-12-0000" value={formData.icNumber} onChange={(e) => handleICChange(e.target.value)} />
+            </div>
+            <div>
+              <label className="label-bento">{current.dob}</label>
+              <input required type="date" className="input-bento" value={formData.dob} onChange={(e) => setFormData({ ...formData, dob: e.target.value })} />
+            </div>
+            <div>
+              <label className="label-bento">{current.gender}</label>
+              <select className="input-bento" value={formData.gender} onChange={(e) => setFormData({ ...formData, gender: e.target.value as any })}>
+                <option value="Lelaki">{lang === 'bm' ? 'Lelaki' : 'Male'}</option>
+                <option value="Perempuan">{lang === 'bm' ? 'Perempuan' : 'Female'}</option>
+              </select>
+            </div>
+            <div>
+              <label className="label-bento">{current.phone}</label>
+              <input type="tel" className="input-bento" placeholder="012-3456789" value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} />
+            </div>
+            <div className="md:col-span-2">
+              <label className="label-bento">{current.email}</label>
+              <input type="email" className="input-bento" placeholder="contoh@email.com" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} />
+            </div>
+            <div className="md:col-span-2">
+              <label className="label-bento">{current.address}</label>
+              <input type="text" className="input-bento" placeholder="..." value={formData.address} onChange={(e) => setFormData({ ...formData, address: e.target.value })} />
+            </div>
+          </div>
+
+          {membershipType === 'Ahli Remaja' && (
+            <motion.div 
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              className="mt-8 pt-8 border-t border-slate-50"
+            >
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6">{current.guardianTitle}</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="label-bento">{current.guardianName}</label>
+                  <input type="text" required className="input-bento" value={formData.guardianName} onChange={(e) => setFormData({ ...formData, guardianName: e.target.value })} />
+                </div>
+                <div>
+                  <label className="label-bento">{current.guardianPhone}</label>
+                  <input type="tel" required className="input-bento" value={formData.guardianPhone} onChange={(e) => setFormData({ ...formData, guardianPhone: e.target.value })} />
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </section>
+
+        {/* Uploads */}
+        <section className="md:col-span-4 bento-card flex flex-col">
+          <h3 className="text-sm font-black text-slate-800 uppercase mb-4 tracking-wider flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-turquoise"></span> {current.documents}
+          </h3>
+          
+          <div className="space-y-4 flex-grow">
+            {[
+              { label: current.photoLabel, key: 'photo', optional: true },
+              { label: current.receiptLabel, key: 'receipt', optional: true }
+            ].map((upload) => (
+              <div key={upload.key} className="relative group p-4 rounded-xl bg-slate-50 border-2 border-dashed border-slate-200 flex flex-col items-center justify-center cursor-pointer hover:border-turquoise hover:bg-turquoise/5 transition-all min-h-[80px]">
+                {previews[upload.key as key_of_previews] ? (
+                  <div className="w-full flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg overflow-hidden border border-slate-200">
+                        <img src={previews[upload.key as key_of_previews]} alt="Preview" className="w-full h-full object-cover" />
+                      </div>
+                      <p className="text-[10px] font-bold text-slate-600 uppercase">{upload.label}</p>
+                    </div>
+                    <button 
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setFiles({ ...files, [upload.key]: undefined });
+                        setPreviews({ ...previews, [upload.key]: undefined });
+                      }}
+                      className="text-red-400 hover:text-red-600 font-bold text-[10px] uppercase tracking-widest"
+                    >
+                      {current.delete}
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <Upload className="w-4 h-4 text-slate-300 mb-2 group-hover:text-turquoise transition-colors" />
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">
+                      {upload.label} <br/>
+                      <span className="text-[8px] opacity-60 font-bold">
+                        {upload.optional ? current.photoHint : current.mandatory}
+                      </span>
+                    </p>
+                    <input 
+                      type="file" 
+                      accept="image/*"
+                      required={!upload.optional}
+                      className="absolute inset-0 opacity-0 cursor-pointer"
+                      onChange={(e) => handleFileChange(e, upload.key)}
+                    />
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+          
+          <p className="mt-4 text-[9px] text-slate-400 leading-tight">
+            {current.bankHint} <br/>
+            <span className="font-bold text-slate-600">{settings?.bankInfo || "MAYBANK: 1234567890 (Nabalu Athletics Club)"}</span>
+          </p>
+        </section>
+
+        {/* Terms and Submit */}
+        <section className="md:col-span-12 bento-card">
+          <div className="flex flex-col md:flex-row gap-8 items-center">
+            <div className="flex-1">
+              <label className="label-bento">{current.termsTitle}</label>
+              <div className="text-[10px] text-slate-500 leading-tight italic">
+                {settings?.termsPdfUrl ? (
+                   <a href={settings.termsPdfUrl} target="_blank" rel="noopener noreferrer" className="text-turquoise underline font-bold hover:text-teal-600 transition-colors">
+                     {current.termsLink}
+                   </a>
+                ) : (
+                  current.termsLink
+                )}
+              </div>
+            </div>
+            <div className="flex-1 w-full space-y-4">
+              <label className="flex items-start gap-3 cursor-pointer group">
+                <input 
+                  type="checkbox" 
+                  checked={acceptedTerms}
+                  onChange={(e) => setAcceptedTerms(e.target.checked)}
+                  className="mt-1" 
+                />
+                <span className="text-[10px] font-bold text-slate-500 uppercase leading-snug">
+                  {current.termsAgree}
+                </span>
+              </label>
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="w-full bg-turquoise hover:bg-turquoise-dark text-white font-black py-4 rounded-xl transition-all shadow-lg shadow-turquoise/20 flex items-center justify-center gap-3 text-sm uppercase tracking-widest"
+              >
+                {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : current.submitBtn}
+              </button>
+            </div>
+          </div>
+        </section>
+      </form>
+    </div>
+  );
+}
+
+type key_of_previews = 'photo' | 'receipt';
