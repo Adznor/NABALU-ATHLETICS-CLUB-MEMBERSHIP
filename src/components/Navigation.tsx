@@ -2,18 +2,19 @@ import React from 'react';
 import { motion } from 'motion/react';
 import { Shield, Users, Info, UserPlus, Lock } from 'lucide-react';
 
-export default function Navigation({ activeTab, setActiveTab, isAdminMode, setIsAdminMode, lang }: { 
+export default function Navigation({ activeTab, setActiveTab, isAdminMode, setIsAdminMode, lang, registrationOpen }: { 
   activeTab: string, 
   setActiveTab: (t: string) => void,
   isAdminMode: boolean,
   setIsAdminMode: (b: boolean) => void,
-  lang: 'bm' | 'en'
+  lang: 'bm' | 'en',
+  registrationOpen?: boolean
 }) {
   const tabs = [
     { id: 'info', label: lang === 'bm' ? 'Info Kelab' : 'Club Info', icon: <Info className="w-4 h-4" /> },
     { id: 'register', label: lang === 'bm' ? 'Daftar' : 'Register', icon: <UserPlus className="w-4 h-4" /> },
     { id: 'list', label: lang === 'bm' ? 'Senarai Ahli' : 'Members', icon: <Users className="w-4 h-4" /> },
-  ];
+  ].filter(tab => tab.id !== 'register' || registrationOpen !== false);
 
   return (
     <nav className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 px-4 w-full max-w-sm sm:max-w-md">
@@ -30,7 +31,7 @@ export default function Navigation({ activeTab, setActiveTab, isAdminMode, setIs
               }`}
             >
               <div className="w-4 h-4">{tab.icon}</div>
-              <span className="hidden xs:inline">{tab.label}</span>
+              <span className="hidden sm:inline">{tab.label}</span>
             </button>
           ))}
         </div>

@@ -14,17 +14,29 @@
         "email": { "type": "string" },
         "guardianName": { "type": "string" },
         "guardianPhone": { "type": "string" },
-        "membershipType": { "type": "string", "enum": ["Ahli Individu", "Ahli Remaja"] },
-        "isOku": { "type": "boolean", "description": "OKU status" },
+        "guardianIc": { "type": "string", "description": "IC number of the guardian" },
+        "membershipType": { "type": "string", "enum": ["Ahli Individu", "Ahli Remaja", "Ahli Kehormat"] },
+        "registrationFeePaid": { "type": "boolean" },
+        "registrationFeeVerifiedAt": { "type": "string", "format": "date-time" },
+        "annualPayments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "year": { "type": "number" },
+              "paid": { "type": "boolean" },
+              "verifiedAt": { "type": "string", "format": "date-time" }
+            }
+          }
+        },
         "photoBase64": { "type": "string", "description": "Mug shot" },
         "receiptBase64": { "type": "string", "description": "Payment receipt" },
         "membershipId": { "type": "string", "description": "Generated after verification" },
-        "status": { "type": "string", "enum": ["pending", "verified", "expired", "cancelled"] },
+        "status": { "type": "string", "enum": ["pending", "verified", "cancelled"] },
         "cancellationReason": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time", "description": "Tarikh Permohonan" },
         "verifiedAt": { "type": "string", "format": "date-time", "description": "Tarikh Disahkan" },
         "cancelledAt": { "type": "string", "format": "date-time", "description": "Tarikh Dibatalkan" },
-        "expiryDate": { "type": "string", "format": "date-time", "description": "Tarikh Tamat Tempoh" },
         "membershipNumber": { "type": "number", "description": "Sequence number for NAC001 format" }
       },
       "required": ["fullName", "icNumber", "membershipType", "status", "createdAt"]
@@ -51,11 +63,31 @@
         "logoUrl": { "type": "string" },
         "terms": { "type": "string" },
         "termsPdfUrl": { "type": "string" },
-        "bankInfo": { "type": "string" }
+        "bankInfo": { "type": "string" },
+        "registrationOpen": { "type": "boolean", "description": "Toggles membership registration visibility" }
       }
+    },
+    "LogEntry": {
+      "title": "Log Entry",
+      "description": "Activity log for actions taken in the system",
+      "type": "object",
+      "properties": {
+        "category": { "type": "string", "enum": ["member", "system", "payment"] },
+        "action": { "type": "string" },
+        "details": { "type": "string" },
+        "adminId": { "type": "string" },
+        "adminEmail": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "targetMemberId": { "type": "string" }
+      },
+      "required": ["category", "action", "details", "adminId", "adminEmail", "timestamp"]
     }
   },
   "firestore": {
+    "/logs/{logId}": {
+      "schema": "LogEntry",
+      "description": "System-wide activity and payment logs"
+    },
     "/members/{memberId}": {
       "schema": "Member",
       "description": "Members collection"

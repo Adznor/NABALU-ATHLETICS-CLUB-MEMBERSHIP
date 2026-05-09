@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { collection, query, orderBy, onSnapshot, doc, deleteDoc, updateDoc, runTransaction, serverTimestamp } from 'firebase/firestore';
+import { db, handleFirestoreError, OperationType, logActivity } from '../lib/firebase';
+import { collection, query, orderBy, onSnapshot, doc, deleteDoc, updateDoc, runTransaction, serverTimestamp, where, limit } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
-import { Users, Search, Trash2, CheckCircle, Grid, List as ListIcon, X, FileText, ImageIcon, CreditCard, Calendar, Edit3, Save, User, Loader2, Download, AlertTriangle, MessageSquare } from 'lucide-react';
+import { Users, Search, Trash2, CheckCircle, Grid, List as ListIcon, X, FileText, ImageIcon, CreditCard, Calendar, Edit3, Save, User, Loader2, Download, AlertTriangle, MessageSquare, Clock, IdCard } from 'lucide-react';
 import { format } from 'date-fns';
-import { Member, MembershipType, MembershipStatus } from '../types';
+import { Member, MembershipType, MembershipStatus, LogEntry } from '../types';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import QRCode from 'qrcode';
 
 const CANCELLATION_REASONS = [
   "Belum membayar yuran keahlian",
@@ -14,10 +17,24 @@ const CANCELLATION_REASONS = [
   "Lain-lain"
 ];
 
-export default function MemberList({ isAdmin = false, lang }: { isAdmin?: boolean, lang: 'bm' | 'en' }) {
+export default function MemberList({ 
+  isAdmin = false, 
+  lang,
+  searchTerm: externalSearchTerm,
+  onSearchTermChange
+}: { 
+  isAdmin?: boolean, 
+  lang: 'bm' | 'en',
+  searchTerm?: string,
+  onSearchTermChange?: (val: string) => void
+}) {
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [internalSearchTerm, setInternalSearchTerm] = useState('');
+  
+  const searchTerm = externalSearchTerm !== undefined ? externalSearchTerm : internalSearchTerm;
+  const setSearchTerm = onSearchTermChange || setInternalSearchTerm;
+
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterMembershipType, setFilterMembershipType] = useState<string>('all');
@@ -41,7 +58,6 @@ export default function MemberList({ isAdmin = false, lang }: { isAdmin?: boolea
       allStatus: "Semua Status",
       pending: "Permohonan Baharu",
       verified: "Ahli Berdaftar",
-      expired: "Tamat Tempoh",
       cancelled: "Dibatalkan",
       allTypes: "Semua Jenis",
       allGender: "Semua Jantina",
@@ -85,7 +101,6 @@ export default function MemberList({ isAdmin = false, lang }: { isAdmin?: boolea
       allStatus: "All Status",
       pending: "New Application",
       verified: "Registered Member",
-      expired: "Expired",
       cancelled: "Cancelled",
       allTypes: "All Types",
       allGender: "All Gender",
@@ -121,32 +136,245 @@ export default function MemberList({ isAdmin = false, lang }: { isAdmin?: boolea
     }
   };
 
+  const exportToPDF = (member: Member) => {
+    const doc = new jsPDF();
+    
+    // Header
+    doc.setFillColor(20, 184, 166); // Turquoise
+    doc.rect(0, 0, 210, 40, 'F');
+    
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(22);
+    doc.setFont('helvetica', 'bold');
+    doc.text('BORANG KEAHLIAN NAC', 105, 20, { align: 'center' });
+    doc.setFontSize(10);
+    doc.text('NOMBOR AHLI: ' + (member.membershipId || 'PENDING'), 105, 30, { align: 'center' });
+    
+    // Member Info Section
+    doc.setTextColor(40, 40, 40);
+    doc.setFontSize(14);
+    doc.text('MAKLUMAT PERIBADI', 20, 55);
+    doc.setDrawColor(200, 200, 200);
+    doc.line(20, 58, 190, 58);
+    
+    const personalInfo = [
+      ['Nama Penuh', member.fullName],
+      ['No. Kad Pengenalan', member.icNumber],
+      ['Tarikh Lahir', member.dob],
+      ['Jantina', member.gender],
+      ['Jenis Keahlian', member.membershipType],
+      ['No. Telefon', member.phone],
+      ['Emel', member.email],
+      ['Alamat', member.address]
+    ];
+    
+    autoTable(doc, {
+      startY: 65,
+      head: [],
+      body: personalInfo,
+      theme: 'plain',
+      styles: { fontSize: 10, cellPadding: 2 },
+      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 50 } }
+    });
+    
+    let finalY = (doc as any).lastAutoTable.finalY + 15;
+    
+    // Guardian Info (if youth)
+    if (member.membershipType === 'Ahli Remaja') {
+      doc.setFontSize(14);
+      doc.text('MAKLUMAT PENJAGA', 20, finalY);
+      doc.line(20, finalY + 3, 190, finalY + 3);
+      
+      const guardianInfo = [
+        ['Nama Penjaga', member.guardianName || '-'],
+        ['No. Telefon Penjaga', member.guardianPhone || '-']
+      ];
+      
+      autoTable(doc, {
+        startY: finalY + 8,
+        head: [],
+        body: guardianInfo,
+        theme: 'plain',
+        styles: { fontSize: 10, cellPadding: 2 },
+        columnStyles: { 0: { fontStyle: 'bold', cellWidth: 50 } }
+      });
+      
+      finalY = (doc as any).lastAutoTable.finalY + 15;
+    }
+    
+    // Payment Info
+    doc.setFontSize(14);
+    doc.text('STATUS KEAHLIAN & YURAN', 20, finalY);
+    doc.line(20, finalY + 3, 190, finalY + 3);
+    
+    const currentYear = new Date().getFullYear();
+    const isPaidCurrent = member.annualPayments?.some(p => p.year === currentYear && p.paid);
+    
+    const paymentInfo = [
+      ['Status Keahlian', member.status.toUpperCase()],
+      ['Tarikh Pendaftaran', member.createdAt ? format(member.createdAt.toDate(), 'dd/MM/yyyy') : '-'],
+      ['Yuran Pendaftaran', member.registrationFeePaid ? 'TELAH DIBAYAR' : 'BELUM DIBAYAR'],
+      [`Yuran Tahunan (${currentYear})`, isPaidCurrent ? 'TELAH DIBAYAR' : 'BELUM DIBAYAR']
+    ];
+    
+    autoTable(doc, {
+      startY: finalY + 8,
+      head: [],
+      body: paymentInfo,
+      theme: 'plain',
+      styles: { fontSize: 10, cellPadding: 2 },
+      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 50 } }
+    });
+    
+    // Footer
+    const pageCount = (doc as any).internal.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFontSize(8);
+      doc.setTextColor(150, 150, 150);
+      doc.text('Dokumen ini dijana secara digital pada ' + format(new Date(), 'dd/MM/yyyy HH:mm'), 105, 285, { align: 'center' });
+    }
+    
+    doc.save(`Borang_Keahlian_${member.fullName.replace(/\s+/g, '_')}.pdf`);
+  };
+
+  const exportMembershipCard = async (member: Member) => {
+    const doc = new jsPDF({
+      orientation: 'landscape',
+      unit: 'mm',
+      format: [85.6, 54] // Standard ID card size (CR80)
+    });
+
+    // Background color
+    doc.setFillColor(15, 23, 42); // slate-900
+    doc.rect(0, 0, 85.6, 54, 'F');
+
+    // Accent bar
+    doc.setFillColor(45, 212, 191); // turquoise-400
+    doc.rect(0, 0, 85.6, 8, 'F');
+
+    // Header text
+    doc.setTextColor(15, 23, 42); // slate-900
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    doc.text('NABALU ATHLETICS CLUB', 42.8, 5.5, { align: 'center' });
+
+    // Photo
+    if (member.photoBase64) {
+      try {
+        // Try to handle photoBase64 if it includes the data prefix
+        const base64 = member.photoBase64.includes('base64,') 
+          ? member.photoBase64 
+          : `data:image/jpeg;base64,${member.photoBase64}`;
+        doc.addImage(base64, 'JPEG', 5, 12, 25, 31);
+      } catch (e) {
+        // Fallback
+        doc.setFillColor(30, 41, 59); // lighter slate
+        doc.rect(5, 12, 25, 31, 'F');
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(10);
+        doc.text(member.fullName.substring(0, 2).toUpperCase(), 17.5, 28, { align: 'center' });
+      }
+    } else {
+      doc.setFillColor(30, 41, 59); // lighter slate
+      doc.rect(5, 12, 25, 31, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(10);
+      doc.text(member.fullName.substring(0, 2).toUpperCase(), 17.5, 28, { align: 'center' });
+    }
+
+    // Name
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(8);
+    doc.text(member.fullName.toUpperCase().substring(0, 30), 35, 18);
+
+    // ID
+    doc.setTextColor(45, 212, 191);
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text(member.membershipId || 'PENDING', 35, 25);
+
+    // Type
+    doc.setTextColor(148, 163, 184); // slate-400
+    doc.setFontSize(6);
+    doc.setFont('helvetica', 'normal');
+    doc.text(member.membershipType.toUpperCase(), 35, 30);
+    
+    // Status
+    doc.setTextColor(255, 255, 255);
+    doc.text('STATUS: ' + member.status.toUpperCase(), 35, 35);
+
+    // QR Code
+    if (member.membershipId) {
+      try {
+        const qrDataUrl = await QRCode.toDataURL(member.membershipId, {
+          margin: 1,
+          width: 200,
+          color: {
+            dark: '#2dd4bf', // turquoise
+            light: '#ffffff'
+          }
+        });
+        doc.addImage(qrDataUrl, 'PNG', 62, 33, 18, 18);
+      } catch (e) {
+        console.error('QR generation failed', e);
+      }
+    } else {
+      // If pending, show a placeholder for QR
+      doc.setDrawColor(45, 212, 191);
+      doc.setLineWidth(0.1);
+      doc.rect(62, 33, 18, 18);
+      doc.setTextColor(45, 212, 191);
+      doc.setFontSize(4);
+      doc.text('PENDING VERIFICATION', 71, 42, { align: 'center' });
+    }
+    
+    // Member since
+    doc.setTextColor(148, 163, 184);
+    doc.setFontSize(5);
+    if (member.verifiedAt) {
+      doc.text('BERMULA: ' + format(member.verifiedAt.toDate(), 'dd/MM/yyyy'), 35, 40);
+    } else if (member.createdAt) {
+      doc.text('MOHON: ' + format(member.createdAt.toDate(), 'dd/MM/yyyy'), 35, 40);
+    }
+
+    doc.save(`KAD_NAC_${member.membershipId || member.fullName.substring(0, 10)}.pdf`);
+  };
+
+  const [memberLogs, setMemberLogs] = useState<LogEntry[]>([]);
+
+  useEffect(() => {
+    if (!selectedMemberForDetail?.id || !isAdmin) {
+      setMemberLogs([]);
+      return;
+    }
+
+    const q = query(
+      collection(db, 'logs'),
+      where('targetMemberId', '==', selectedMemberForDetail.id),
+      orderBy('timestamp', 'desc'),
+      limit(20)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setMemberLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as LogEntry)));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'logs'));
+
+    return () => unsubscribe();
+  }, [selectedMemberForDetail?.id, isAdmin]);
+
   const current = t[lang];
 
   useEffect(() => {
     const q = query(collection(db, 'members'), orderBy('createdAt', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const memberList: Member[] = [];
-      const now = new Date();
       
       snapshot.forEach((docSnap) => {
         const data = docSnap.data() as Member;
         const id = docSnap.id;
         
-        // Auto Expiry Logic (Client-side derivation + background update for Admin)
-        let currentStatus = data.status;
-        if (data.status === 'verified' && data.expiryDate) {
-          const expDate = data.expiryDate.toDate ? data.expiryDate.toDate() : new Date(data.expiryDate);
-          if (expDate < now) {
-            currentStatus = 'expired';
-            // Only Admin triggers the actual DB update to minimize writes
-            if (isAdmin) {
-              updateDoc(doc(db, 'members', id), { status: 'expired' }).catch(console.error);
-            }
-          }
-        }
-        
-        memberList.push({ id, ...data, status: currentStatus } as Member);
+        memberList.push({ id, ...data } as Member);
       });
       setMembers(memberList);
       setLoading(false);
@@ -193,7 +421,8 @@ export default function MemberList({ isAdmin = false, lang }: { isAdmin?: boolea
     const headers = [
       'No. Ahli', 'Nama Penuh', 'No. KP/MyKid', 'Jenis Keahlian', 
       'Jantina', 'Tarikh Lahir', 'Alamat', 'No. Telefon', 
-      'Email', 'Nama Penjaga', 'No. Tel Penjaga', 'Status', 'Tarikh Daftar'
+      'Email', 'Nama Penjaga', 'No. Tel Penjaga', 'Status', 
+      'Yuran Pendaftaran', 'Yuran Tahunan Terkini', 'Tarikh Daftar'
     ];
 
     const rows = filteredMembers.map(m => [
@@ -209,6 +438,8 @@ export default function MemberList({ isAdmin = false, lang }: { isAdmin?: boolea
       m.guardianName ? `"${m.guardianName.replace(/"/g, '""')}"` : '-',
       m.guardianPhone || '-',
       m.status === 'verified' ? 'Disahkan' : 'Menunggu',
+      m.registrationFeePaid ? 'Sudah Dibayar' : 'Belum Dibayar',
+      m.annualPayments?.some(p => p.year === new Date().getFullYear() && p.paid) ? 'Sudah Dibayar' : 'Belum Dibayar',
       m.createdAt ? format(m.createdAt.toDate(), 'dd/MM/yyyy') : '-'
     ]);
 
@@ -233,7 +464,17 @@ export default function MemberList({ isAdmin = false, lang }: { isAdmin?: boolea
     
     setIsDeleting(true);
     try {
+      const memberName = deletingMember.fullName;
+      const memberId = deletingMember.id;
       await deleteDoc(doc(db, 'members', deletingMember.id));
+      
+      logActivity({
+        category: 'member',
+        action: 'Member Deleted',
+        details: `Member ${memberName} (${memberId}) was removed by admin.`,
+        targetMemberId: memberId
+      });
+
       setDeletingMember(null);
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `members/${deletingMember.id}`);
@@ -266,11 +507,18 @@ export default function MemberList({ isAdmin = false, lang }: { isAdmin?: boolea
           membershipId,
           membershipNumber: newCount,
           verifiedAt: serverTimestamp(),
-          expiryDate: expiryDate,
           cancellationReason: null 
         });
         
         transaction.set(counterDocRef, { count: newCount }, { merge: true });
+
+        // Log the activity
+        logActivity({
+          category: 'member',
+          action: 'Member Verified',
+          details: `Member verified with ID ${membershipId}`,
+          targetMemberId: id
+        });
       });
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `members/${id}`);
@@ -292,6 +540,33 @@ export default function MemberList({ isAdmin = false, lang }: { isAdmin?: boolea
         // Use handleVerify logic for first-time verification to ensure unique ID
         await handleVerify(id);
       } else {
+        // Check for payment changes to log
+        const isRegPaidChanged = originalMember?.registrationFeePaid !== editingMember.registrationFeePaid;
+        const currentYear = new Date().getFullYear();
+        const originalAnnualPaid = originalMember?.annualPayments?.some(p => p.year === currentYear && p.paid);
+        const editingAnnualPaid = editingMember.annualPayments?.some(p => p.year === currentYear && p.paid);
+        const isAnnualPaidChanged = originalAnnualPaid !== editingAnnualPaid;
+
+        if (isRegPaidChanged && editingMember.registrationFeePaid) {
+          const payDate = format(new Date(), 'dd/MM/yyyy');
+          logActivity({
+            category: 'payment',
+            action: 'Registration Fee Paid',
+            details: `Registration fee marked as PAID for ${editingMember.fullName} on ${payDate}.`,
+            targetMemberId: id
+          });
+        }
+
+        if (isAnnualPaidChanged && editingAnnualPaid) {
+          const payDate = format(new Date(), 'dd/MM/yyyy');
+          logActivity({
+            category: 'payment',
+            action: 'Annual Fee Paid',
+            details: `Annual fee (${currentYear}) marked as PAID for ${editingMember.fullName} on ${payDate}.`,
+            targetMemberId: id
+          });
+        }
+
         // Standard update
         const finalData = { ...updateData };
         if (isStatusChanged) {
@@ -301,6 +576,13 @@ export default function MemberList({ isAdmin = false, lang }: { isAdmin?: boolea
         await updateDoc(doc(db, 'members', id), finalData);
       }
       
+      logActivity({
+        category: 'member',
+        action: 'Member Updated',
+        details: `Member ${editingMember.fullName} information updated by admin.`,
+        targetMemberId: id
+      });
+
       setEditingMember(null);
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `members/${editingMember.id}`);
@@ -326,18 +608,20 @@ export default function MemberList({ isAdmin = false, lang }: { isAdmin?: boolea
   return (
     <div className="max-w-7xl mx-auto px-4 py-12">
       <div className="flex flex-col lg:flex-row gap-4 mb-6">
-        <div className="relative flex-grow">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
-          <input
-            type="text"
-            placeholder={current.searchPlaceholder}
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-12 pr-4 py-4 bg-white border border-teal-50 rounded-2xl shadow-sm focus:ring-2 focus:ring-turquoise text-sm outline-none transition-all"
-          />
-        </div>
+        {externalSearchTerm === undefined && (
+          <div className="relative flex-grow">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
+            <input
+              type="text"
+              placeholder={current.searchPlaceholder}
+              value={searchTerm || ''}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-12 pr-4 py-4 bg-white border border-teal-50 rounded-2xl shadow-sm focus:ring-2 focus:ring-turquoise text-sm outline-none transition-all"
+            />
+          </div>
+        )}
         
-        <div className="flex flex-wrap items-center gap-2">
+        <div className={`flex flex-wrap items-center gap-2 ${externalSearchTerm !== undefined ? 'w-full justify-between' : ''}`}>
           <select 
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value)}
@@ -346,7 +630,6 @@ export default function MemberList({ isAdmin = false, lang }: { isAdmin?: boolea
             <option value="all">{current.allStatus}</option>
             <option value="pending">{current.pending}</option>
             <option value="verified">{current.verified}</option>
-            <option value="expired">{current.expired}</option>
             {isAdmin && <option value="cancelled">{current.cancelled}</option>}
           </select>
 
@@ -358,6 +641,7 @@ export default function MemberList({ isAdmin = false, lang }: { isAdmin?: boolea
             <option value="all">{current.allTypes}</option>
             <option value="Ahli Individu">{lang === 'bm' ? 'Ahli Individu' : 'Individual Member'}</option>
             <option value="Ahli Remaja">{lang === 'bm' ? 'Ahli Remaja' : 'Youth Member'}</option>
+            <option value="Ahli Kehormat">{lang === 'bm' ? 'Ahli Kehormat' : 'Honorary Member'}</option>
           </select>
 
           <select 
@@ -416,7 +700,7 @@ export default function MemberList({ isAdmin = false, lang }: { isAdmin?: boolea
                 <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">{current.headerId}</th>
                 <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">{current.headerStatus}</th>
                 <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">{current.headerDate}</th>
-                <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center font-mono">{current.headerExpiry}</th>
+                {isAdmin && <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Yuran</th>}
                 {isAdmin && <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">{current.headerAction}</th>}
               </tr>
             </thead>
@@ -444,7 +728,6 @@ export default function MemberList({ isAdmin = false, lang }: { isAdmin?: boolea
                         <p className="font-bold text-slate-800 text-sm">{member.fullName}</p>
                         <div className="flex items-center gap-2">
                           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{member.membershipType}</p>
-                          {member.isOku && <span className="bg-purple-100 text-purple-600 text-[8px] font-black px-1 rounded">OKU</span>}
                         </div>
                       </div>
                     </div>
@@ -458,14 +741,14 @@ export default function MemberList({ isAdmin = false, lang }: { isAdmin?: boolea
                   </td>
                   <td className="px-6 py-4 text-center">
                     <div className={`text-[9px] font-black uppercase px-3 py-1 rounded-full inline-block ${
+                      member.membershipType === 'Ahli Kehormat' ? 'bg-amber-100 text-amber-700 border border-amber-200' :
                       member.status === 'verified' ? 'bg-teal-100 text-teal-600' : 
                       member.status === 'cancelled' ? 'bg-red-100 text-red-600' :
-                      member.status === 'expired' ? 'bg-slate-200 text-slate-600' :
                       'bg-orange-100 text-orange-600'
                     }`}>
-                      {member.status === 'verified' ? current.verified.toUpperCase() : 
+                      {member.membershipType === 'Ahli Kehormat' && member.status === 'verified' ? 'KEHORMAT' :
+                       member.status === 'verified' ? current.verified.toUpperCase() : 
                        member.status === 'cancelled' ? current.cancelled.toUpperCase() : 
-                       member.status === 'expired' ? current.expired.toUpperCase() :
                        current.pending.toUpperCase()}
                     </div>
                     {member.status === 'cancelled' && member.cancellationReason && (
@@ -491,14 +774,33 @@ export default function MemberList({ isAdmin = false, lang }: { isAdmin?: boolea
                       )}
                     </div>
                   </td>
-                  <td className="px-6 py-4 text-center">
-                    <span className="text-[10px] font-black text-slate-400">
-                      {member.expiryDate ? format(member.expiryDate.toDate ? member.expiryDate.toDate() : member.expiryDate, 'dd/MM/yyyy') : '-'}
-                    </span>
-                  </td>
+                  {isAdmin && (
+                    <td className="px-6 py-4 text-center">
+                      <div className="flex flex-col gap-0.5 items-center">
+                        <div className="flex items-center gap-1.5 p-1 px-2 rounded-lg bg-slate-50 border border-slate-100 shadow-sm">
+                           <div className="flex flex-col items-center">
+                             <span className="text-[6px] font-bold text-slate-400 mb-0.5">REG</span>
+                             <div className={`w-2 h-2 rounded-full ${member.registrationFeePaid ? 'bg-teal-400' : 'bg-slate-200'}`} title="Yuran Pendaftaran" />
+                           </div>
+                           <div className="w-[1px] h-4 bg-slate-200 mx-0.5" />
+                           <div className="flex flex-col items-center">
+                             <span className="text-[6px] font-bold text-slate-400 mb-0.5">{new Date().getFullYear()}</span>
+                             <div className={`w-2 h-2 rounded-full ${member.annualPayments?.some(p => p.year === new Date().getFullYear() && p.paid) ? 'bg-orange-400' : 'bg-slate-200'}`} title={`Yuran Tahunan ${new Date().getFullYear()}`} />
+                           </div>
+                        </div>
+                      </div>
+                    </td>
+                  )}
                   {isAdmin && (
                     <td className="px-6 py-4 text-right">
                       <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+                        <button 
+                          onClick={() => exportMembershipCard(member)}
+                          className="w-8 h-8 rounded bg-teal-50 text-teal-600 flex items-center justify-center hover:bg-teal-600 hover:text-white transition-all shadow-sm"
+                          title="Muat Turun Kad"
+                        >
+                          <IdCard className="w-4 h-4" />
+                        </button>
                         <button 
                           onClick={() => setEditingMember(member)}
                           className="w-8 h-8 rounded bg-blue-100 text-blue-600 flex items-center justify-center hover:bg-blue-600 hover:text-white transition-all shadow-sm"
@@ -531,20 +833,22 @@ export default function MemberList({ isAdmin = false, lang }: { isAdmin?: boolea
           </table>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
           {filteredMembers.map((member) => (
             <motion.div 
               layout
               key={member.id}
               onClick={() => !isAdmin && setSelectedMemberForDetail(member)}
-              className={`bento-card group flex flex-col items-center text-center transition-all cursor-pointer border-white/50 backdrop-blur-md shadow-lg hover:shadow-xl ${
+              className={`bento-card !p-4 sm:!p-6 group flex flex-col items-center text-center transition-all cursor-pointer border-white/50 backdrop-blur-md shadow-lg hover:shadow-xl ${
                 member.membershipType === 'Ahli Remaja' 
                 ? 'bg-gradient-to-br from-white via-white to-green-100/50' 
+                : member.membershipType === 'Ahli Kehormat'
+                ? 'bg-gradient-to-br from-white via-amber-50 to-amber-200/50 border-amber-200/50'
                 : 'bg-gradient-to-br from-white via-white to-slate-200/50'
               }`}
             >
               <div 
-                className="w-20 h-20 rounded-[2rem] overflow-hidden bg-white mb-4 group-hover:scale-105 transition-transform shadow-md border-4 border-white/80"
+                className="w-16 h-16 sm:w-20 sm:h-20 rounded-[1.5rem] sm:rounded-[2rem] overflow-hidden bg-white mb-3 sm:mb-4 group-hover:scale-105 transition-transform shadow-md border-4 border-white/80"
               >
                 {member.photoBase64 ? (
                   <img src={member.photoBase64} className="w-full h-full object-cover" />
@@ -559,20 +863,21 @@ export default function MemberList({ isAdmin = false, lang }: { isAdmin?: boolea
               
                 <div className="flex gap-2">
                   <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest ${
+                     member.membershipType === 'Ahli Kehormat' ? 'bg-amber-100 text-amber-700' :
                      member.status === 'verified' ? 'bg-teal-100 text-teal-600' : 
                      member.status === 'cancelled' ? 'bg-red-100 text-red-600' :
-                     member.status === 'expired' ? 'bg-slate-200 text-slate-600' :
                      'bg-orange-100 text-orange-600'
                   }`}>
-                    {member.status === 'verified' ? current.verified.toUpperCase() : 
+                    {member.membershipType === 'Ahli Kehormat' && member.status === 'verified' ? 'KEHORMAT' :
+                     member.status === 'verified' ? current.verified.toUpperCase() : 
                      member.status === 'cancelled' ? current.cancelled.toUpperCase() : 
-                     member.status === 'expired' ? current.expired.toUpperCase() :
                      current.pending.toUpperCase()}
                   </span>
-                  <span className="px-2 py-0.5 bg-white/50 text-slate-400 rounded text-[8px] font-black uppercase tracking-widest border border-slate-100 shadow-sm">
+                  <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest border border-slate-100 shadow-sm ${
+                    member.membershipType === 'Ahli Kehormat' ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-white/50 text-slate-400'
+                  }`}>
                     {member.membershipType}
                   </span>
-                  {member.isOku && <span className="px-2 py-0.5 bg-purple-100 text-purple-600 rounded text-[8px] font-black uppercase tracking-widest shadow-sm">OKU</span>}
                 </div>
               
               {isAdmin && member.status === 'cancelled' && member.cancellationReason && (
@@ -590,9 +895,30 @@ export default function MemberList({ isAdmin = false, lang }: { isAdmin?: boolea
               </div>
 
               {isAdmin && (
+                <div className="mb-4 flex gap-2 p-2 bg-slate-50 rounded-xl border border-slate-100">
+                  <div className="flex flex-col items-center flex-1">
+                    <span className="text-[6px] font-black text-slate-400 uppercase mb-1">Pendaftaran</span>
+                    <div className={`w-2 h-2 rounded-full ${member.registrationFeePaid ? 'bg-teal-400' : 'bg-slate-200'}`} />
+                  </div>
+                  <div className="w-[1px] h-4 bg-slate-200" />
+                  <div className="flex flex-col items-center flex-1">
+                    <span className="text-[6px] font-black text-slate-400 uppercase mb-1">Yuran {new Date().getFullYear()}</span>
+                    <div className={`w-2 h-2 rounded-full ${member.annualPayments?.some(p => p.year === new Date().getFullYear() && p.paid) ? 'bg-orange-400' : 'bg-slate-200'}`} />
+                  </div>
+                </div>
+              )}
+
+              {isAdmin && (
                 <div className="mt-auto pt-4 border-t border-slate-50 flex items-center justify-between w-full" onClick={e => e.stopPropagation()}>
                   <p className="text-[8px] text-slate-400 font-bold uppercase tracking-widest">Aksi:</p>
                   <div className="flex gap-2">
+                    <div 
+                      onClick={() => exportMembershipCard(member)}
+                      className="w-7 h-7 rounded-lg bg-teal-50 text-teal-600 flex items-center justify-center text-[10px] cursor-pointer hover:bg-teal-500 hover:text-white transition-all shadow-sm"
+                      title="Muat Turun Kad"
+                    >
+                      <IdCard className="w-3.5 h-3.5" />
+                    </div>
                     <div 
                       onClick={() => setEditingMember(member)}
                       className="w-7 h-7 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center text-[10px] cursor-pointer hover:bg-blue-500 hover:text-white transition-all shadow-sm"
@@ -676,7 +1002,7 @@ export default function MemberList({ isAdmin = false, lang }: { isAdmin?: boolea
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.9, y: 20 }}
-              className="bg-white rounded-[2rem] w-full max-w-2xl relative my-8 shadow-2xl"
+              className="bg-white rounded-[2rem] w-full max-w-2xl max-h-[90vh] overflow-y-auto relative my-8 shadow-2xl custom-scrollbar"
               onClick={e => e.stopPropagation()}
             >
               <div className="bg-white p-6 border-b border-slate-50 flex items-center justify-between rounded-t-[2rem]">
@@ -703,7 +1029,7 @@ export default function MemberList({ isAdmin = false, lang }: { isAdmin?: boolea
                     <label className="label-bento">Nama Penuh</label>
                     <input 
                       type="text" 
-                      value={editingMember.fullName}
+                      value={editingMember.fullName || ''}
                       onChange={(e) => setEditingMember({...editingMember, fullName: e.target.value})}
                       className="input-bento font-bold"
                       required
@@ -713,7 +1039,7 @@ export default function MemberList({ isAdmin = false, lang }: { isAdmin?: boolea
                     <label className="label-bento">No. KP / MyKid</label>
                     <input 
                       type="text" 
-                      value={editingMember.icNumber}
+                      value={editingMember.icNumber || ''}
                       onChange={(e) => setEditingMember({...editingMember, icNumber: e.target.value})}
                       className="input-bento"
                       required
@@ -722,70 +1048,82 @@ export default function MemberList({ isAdmin = false, lang }: { isAdmin?: boolea
                       <div>
                         <label className="label-bento">Jenis Keahlian</label>
                         <select 
-                          value={editingMember.membershipType}
+                          value={editingMember.membershipType || ''}
                           onChange={(e) => setEditingMember({...editingMember, membershipType: e.target.value as MembershipType})}
                           className="input-bento font-bold"
                         >
                           <option value="Ahli Individu">Ahli Individu</option>
                           <option value="Ahli Remaja">Ahli Remaja</option>
+                          <option value="Ahli Kehormat">Ahli Kehormat</option>
                         </select>
                       </div>
 
-                      <div className="flex flex-col justify-end pb-2">
-                        <label className="label-bento mb-2">Status OKU</label>
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setEditingMember({...editingMember, isOku: true})}
-                            className={`flex-1 py-3 rounded-xl border-2 font-black text-[10px] tracking-widest transition-all ${editingMember.isOku ? 'border-purple-500 bg-purple-50 text-purple-600' : 'border-slate-50 text-slate-400'}`}
-                          >
-                            YA
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setEditingMember({...editingMember, isOku: false})}
-                            className={`flex-1 py-3 rounded-xl border-2 font-black text-[10px] tracking-widest transition-all ${!editingMember.isOku ? 'border-turquoise bg-turquoise/5 text-turquoise' : 'border-slate-50 text-slate-400'}`}
-                          >
-                            TIDAK
-                          </button>
-                        </div>
-                      </div>
-
-                   <div>
+                  <div>
                     <label className="label-bento">Status Keahlian</label>
                     <select 
-                      value={editingMember.status}
+                      value={editingMember.status || ''}
                       onChange={(e) => setEditingMember({...editingMember, status: e.target.value as MembershipStatus})}
                       className="input-bento font-black text-turquoise uppercase"
                     >
                       <option value="pending">{current.pending}</option>
                       <option value="verified">{current.verified}</option>
-                      <option value="expired">{current.expired}</option>
                       <option value="cancelled">{current.cancelled}</option>
                     </select>
                   </div>
 
-                  <div>
-                    <label className="label-bento">Tarikh Tamat Tempoh</label>
-                    <div className="flex gap-2">
-                       <input 
-                        type="date" 
-                        value={editingMember.expiryDate ? (editingMember.expiryDate.toDate ? format(editingMember.expiryDate.toDate(), 'yyyy-MM-dd') : format(new Date(editingMember.expiryDate), 'yyyy-MM-dd')) : ''}
-                        onChange={(e) => setEditingMember({...editingMember, expiryDate: new Date(e.target.value)})}
-                        className="input-bento flex-grow font-bold"
-                      />
-                      <button 
-                        type="button"
-                        onClick={() => {
-                          const yearFromNow = new Date();
-                          yearFromNow.setFullYear(yearFromNow.getFullYear() + 1);
-                          setEditingMember({...editingMember, expiryDate: yearFromNow});
-                        }}
-                        className="p-3 bg-teal-50 text-teal-600 rounded-2xl hover:bg-teal-100 transition-colors"
-                        title="1 Tahun dari sekarang"
-                      >
-                        <Calendar className="w-5 h-5" />
-                      </button>
+                  <div className="md:col-span-2 p-6 bg-slate-50 rounded-[2rem] border border-teal-50">
+                    <h4 className="text-[10px] font-black text-slate-800 uppercase tracking-widest mb-4 flex items-center gap-2">
+                      <CreditCard className="w-3 h-3 text-turquoise" /> Status Pembayaran Bendahari
+                    </h4>
+                    <div className="space-y-4">
+                      <label className="flex items-center gap-3 cursor-pointer group">
+                        <input 
+                          type="checkbox" 
+                          checked={editingMember.registrationFeePaid}
+                          onChange={(e) => setEditingMember({...editingMember, registrationFeePaid: e.target.checked, registrationFeeVerifiedAt: e.target.checked ? serverTimestamp() : null})}
+                          className="w-4 h-4 rounded border-slate-300 text-turquoise focus:ring-turquoise" 
+                        />
+                        <span className="text-xs font-bold text-slate-600 uppercase">Yuran Pendaftaran (Sekali Sahaja)</span>
+                        {editingMember.registrationFeePaid && editingMember.registrationFeeVerifiedAt && (
+                          <span className="text-[8px] font-black text-teal-400">DISAHKAN</span>
+                        )}
+                      </label>
+
+                      <div className="pt-4 border-t border-slate-200">
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3">Yuran Tahunan (History)</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          {(() => {
+                            const startYear = editingMember.createdAt ? editingMember.createdAt.toDate().getFullYear() : new Date().getFullYear();
+                            const currentYear = new Date().getFullYear();
+                            const years = [];
+                            for (let y = currentYear; y >= startYear; y--) {
+                              years.push(y);
+                            }
+                            return years.map(year => {
+                              const payment = editingMember.annualPayments?.find(p => p.year === year);
+                              return (
+                                <div key={year} className="flex flex-col p-3 bg-white rounded-xl border border-slate-100 shadow-sm gap-2">
+                                  <span className="text-[9px] font-black text-slate-400">{year}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const others = (editingMember.annualPayments || []).filter(p => p.year !== year);
+                                      if (payment?.paid) {
+                                        setEditingMember({...editingMember, annualPayments: others});
+                                      } else {
+                                        setEditingMember({...editingMember, annualPayments: [...others, { year, paid: true, verifiedAt: new Date() }]});
+                                      }
+                                    }}
+                                    className={`w-full py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all ${payment?.paid ? 'bg-teal-500 text-white shadow-md' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}
+                                  >
+                                    {payment?.paid ? 'Dibayar' : 'Bayar'}
+                                  </button>
+                                </div>
+                              );
+                            });
+                          })()}
+                        </div>
+                      </div>
                     </div>
                   </div>
 
@@ -821,7 +1159,7 @@ export default function MemberList({ isAdmin = false, lang }: { isAdmin?: boolea
                     <label className="label-bento">No. Telefon</label>
                     <input 
                       type="text" 
-                      value={editingMember.phone}
+                      value={editingMember.phone || ''}
                       onChange={(e) => setEditingMember({...editingMember, phone: e.target.value})}
                       className="input-bento"
                     />
@@ -830,7 +1168,7 @@ export default function MemberList({ isAdmin = false, lang }: { isAdmin?: boolea
                     <label className="label-bento">Email</label>
                     <input 
                       type="email" 
-                      value={editingMember.email}
+                      value={editingMember.email || ''}
                       onChange={(e) => setEditingMember({...editingMember, email: e.target.value})}
                       className="input-bento"
                     />
@@ -839,7 +1177,7 @@ export default function MemberList({ isAdmin = false, lang }: { isAdmin?: boolea
                     <label className="label-bento">Tarikh Lahir</label>
                     <input 
                       type="date" 
-                      value={editingMember.dob}
+                      value={editingMember.dob || ''}
                       onChange={(e) => setEditingMember({...editingMember, dob: e.target.value})}
                       className="input-bento"
                     />
@@ -847,7 +1185,7 @@ export default function MemberList({ isAdmin = false, lang }: { isAdmin?: boolea
                   <div>
                     <label className="label-bento">Jantina</label>
                     <select 
-                      value={editingMember.gender}
+                      value={editingMember.gender || ''}
                       onChange={(e) => setEditingMember({...editingMember, gender: e.target.value as any})}
                       className="input-bento"
                     >
@@ -858,7 +1196,7 @@ export default function MemberList({ isAdmin = false, lang }: { isAdmin?: boolea
                   <div className="md:col-span-2">
                     <label className="label-bento">Alamat Tetap</label>
                     <textarea 
-                      value={editingMember.address}
+                      value={editingMember.address || ''}
                       onChange={(e) => setEditingMember({...editingMember, address: e.target.value})}
                       className="input-bento min-h-[80px]"
                     />
@@ -875,6 +1213,15 @@ export default function MemberList({ isAdmin = false, lang }: { isAdmin?: boolea
                           type="text" 
                           value={editingMember.guardianName || ''}
                           onChange={(e) => setEditingMember({...editingMember, guardianName: e.target.value})}
+                          className="input-bento"
+                        />
+                      </div>
+                      <div>
+                        <label className="label-bento">No. KP Penjaga</label>
+                        <input 
+                          type="text" 
+                          value={editingMember.guardianIc || ''}
+                          onChange={(e) => setEditingMember({...editingMember, guardianIc: e.target.value})}
                           className="input-bento"
                         />
                       </div>
@@ -928,7 +1275,7 @@ export default function MemberList({ isAdmin = false, lang }: { isAdmin?: boolea
               initial={{ scale: 0.9, y: 50 }}
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.9, y: 50 }}
-              className={`w-full max-w-xl rounded-[2.5rem] overflow-hidden shadow-2xl relative border border-white/50 ${
+              className={`w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-[2.5rem] overflow-hidden shadow-2xl relative border border-white/50 custom-scrollbar ${
                 selectedMemberForDetail.membershipType === 'Ahli Remaja' 
                 ? 'bg-gradient-to-br from-white via-white to-green-50' 
                 : 'bg-gradient-to-br from-white via-white to-slate-100'
@@ -962,7 +1309,6 @@ export default function MemberList({ isAdmin = false, lang }: { isAdmin?: boolea
                     </span>
                     <h2 className="text-3xl font-black text-slate-800 tracking-tight mb-2 leading-none">
                       {selectedMemberForDetail.fullName}
-                      {selectedMemberForDetail.isOku && <span className="ml-3 inline-block bg-purple-100 text-purple-600 text-xs px-2 py-0.5 rounded-lg border border-purple-200 align-middle">OKU</span>}
                     </h2>
                     
                     <div className="bg-turquoise text-white inline-block px-8 py-5 rounded-[2rem] shadow-2xl shadow-turquoise/30 mt-4">
@@ -972,24 +1318,84 @@ export default function MemberList({ isAdmin = false, lang }: { isAdmin?: boolea
                       </p>
                     </div>
 
-                    <div className="mt-8 grid grid-cols-2 gap-4">
-                      <div className="p-4 bg-white/50 rounded-2xl border border-white/50">
-                        <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-1">{current.headerStatus}</p>
-                         <p className={`text-xs font-black uppercase ${
-                           selectedMemberForDetail.status === 'verified' ? 'text-teal-500' : 
-                           selectedMemberForDetail.status === 'expired' ? 'text-slate-400' :
-                           selectedMemberForDetail.status === 'cancelled' ? 'text-red-500' :
-                           'text-orange-500'
-                         }`}>
-                           {selectedMemberForDetail.status === 'verified' ? current.verified : 
-                            selectedMemberForDetail.status === 'expired' ? current.expired : 
-                            selectedMemberForDetail.status === 'cancelled' ? current.cancelled : 
-                            current.pending}
-                         </p>
-                      </div>
-                      <div className="p-4 bg-white/50 rounded-2xl border border-white/50">
-                        <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-1">Jantina</p>
-                        <p className="text-xs font-black text-slate-700 uppercase">{lang === 'bm' ? selectedMemberForDetail.gender : (selectedMemberForDetail.gender === 'Lelaki' ? 'Male' : 'Female')}</p>
+                    <div className="mt-8 grid grid-cols-1 gap-4">
+                      {isAdmin && (
+                        <button 
+                          onClick={() => exportMembershipCard(selectedMemberForDetail)}
+                          className="w-full flex items-center justify-center gap-2 p-4 bg-teal-600 hover:bg-teal-700 text-white rounded-2xl shadow-lg shadow-teal-200 transition-all font-black text-[10px] uppercase tracking-widest"
+                        >
+                          <IdCard className="w-4 h-4" />
+                          Muat Turun Kad Keahlian
+                        </button>
+                      )}
+
+                      {isAdmin && (
+                        <button 
+                          onClick={() => exportToPDF(selectedMemberForDetail)}
+                          className="w-full flex items-center justify-center gap-2 p-4 bg-teal-50 hover:bg-teal-100 text-teal-700 rounded-2xl border border-teal-100 shadow-sm transition-all font-black text-[10px] uppercase tracking-widest"
+                        >
+                          <FileText className="w-4 h-4" />
+                          Cetakan PDF Borang Keahlian
+                        </button>
+                      )}
+                      
+                      {isAdmin && (
+                        <div className="p-4 bg-white/50 rounded-2xl border border-white/50">
+                          <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-3 italic">Status Pembayaran</p>
+                          <div className="flex flex-col gap-2">
+                            <div className="flex flex-col gap-1 text-[10px] font-black uppercase tracking-widest">
+                              <div className="flex items-center justify-between">
+                                <span className="text-slate-400">Yuran Pendaftaran</span>
+                                <span className={selectedMemberForDetail.registrationFeePaid ? 'text-teal-500' : 'text-slate-300'}>
+                                  {selectedMemberForDetail.registrationFeePaid ? 'TELAH DIBAYAR ✓' : 'BELUM BAYAR X'}
+                                </span>
+                              </div>
+                              {selectedMemberForDetail.registrationFeePaid && selectedMemberForDetail.registrationFeeVerifiedAt && (
+                                <p className="text-[8px] text-slate-400 text-right font-mono italic">
+                                  Tarikh: {format(selectedMemberForDetail.registrationFeeVerifiedAt.toDate(), 'dd/MM/yyyy')}
+                                </p>
+                              )}
+                            </div>
+                            
+                            <div className="flex flex-col gap-1 text-[10px] font-black uppercase tracking-widest">
+                              <div className="flex items-center justify-between">
+                                <span className="text-slate-400">Yuran Tahunan ({new Date().getFullYear()})</span>
+                                <span className={selectedMemberForDetail.annualPayments?.some(p => p.year === new Date().getFullYear() && p.paid) ? 'text-orange-500' : 'text-slate-300'}>
+                                  {selectedMemberForDetail.annualPayments?.some(p => p.year === new Date().getFullYear() && p.paid) ? 'TELAH DIBAYAR ✓' : 'BELUM BAYAR X'}
+                                </span>
+                              </div>
+                              {(() => {
+                                const currentPayment = selectedMemberForDetail.annualPayments?.find(p => p.year === new Date().getFullYear() && p.paid);
+                                if (currentPayment && currentPayment.verifiedAt) {
+                                  return (
+                                    <p className="text-[8px] text-slate-400 text-right font-mono italic">
+                                      Tarikh: {format(currentPayment.verifiedAt.toDate(), 'dd/MM/yyyy')}
+                                    </p>
+                                  );
+                                }
+                                return null;
+                              })()}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      <div className="p-4 bg-white/50 rounded-2xl border border-white/50 flex justify-between items-center text-center md:text-left">
+                        <div className="flex-1">
+                          <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-1">{current.headerStatus}</p>
+                           <p className={`text-xs font-black uppercase ${
+                             selectedMemberForDetail.status === 'verified' ? 'text-teal-500' : 
+                             selectedMemberForDetail.status === 'cancelled' ? 'text-red-500' :
+                             'text-orange-500'
+                           }`}>
+                             {selectedMemberForDetail.status === 'verified' ? current.verified : 
+                              selectedMemberForDetail.status === 'cancelled' ? current.cancelled : 
+                              current.pending}
+                           </p>
+                        </div>
+                        <div className="flex-1 text-center">
+                          <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-1">Jantina</p>
+                          <p className="text-xs font-black text-slate-700 uppercase">{lang === 'bm' ? selectedMemberForDetail.gender : (selectedMemberForDetail.gender === 'Lelaki' ? 'Male' : 'Female')}</p>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1002,12 +1408,40 @@ export default function MemberList({ isAdmin = false, lang }: { isAdmin?: boolea
                       {selectedMemberForDetail.createdAt ? format(selectedMemberForDetail.createdAt.toDate(), 'dd/MMMM/yyyy') : '-'}
                     </p>
                   </div>
-                  {selectedMemberForDetail.expiryDate && (
+                  {selectedMemberForDetail.guardianName && (
                     <div>
-                      <p className="text-[10px] font-black text-teal-400 uppercase tracking-widest mb-1">{current.headerExpiry}</p>
-                      <p className="text-sm font-black text-slate-800">
-                        {format(selectedMemberForDetail.expiryDate.toDate ? selectedMemberForDetail.expiryDate.toDate() : selectedMemberForDetail.expiryDate, 'dd/MMMM/yyyy')}
+                      <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-1">Penjaga</p>
+                      <p className="text-sm font-bold text-slate-600">
+                        {selectedMemberForDetail.guardianName}
                       </p>
+                    </div>
+                  )}
+                  {selectedMemberForDetail.guardianPhone && (
+                    <div>
+                      <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-1">Telefon Penjaga</p>
+                      <p className="text-sm font-bold text-slate-600">{selectedMemberForDetail.guardianPhone}</p>
+                    </div>
+                  )}
+
+                  {isAdmin && memberLogs.length > 0 && (
+                    <div className="col-span-1 md:col-span-2 pt-6 border-t border-slate-50">
+                      <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-4 flex items-center gap-2">
+                        <Clock className="w-3 h-3 text-turquoise" /> Rekod Aktiviti Ahli
+                      </p>
+                      <div className="space-y-3">
+                        {memberLogs.map(log => (
+                          <div key={log.id} className="p-3 bg-slate-50 rounded-xl border border-slate-100 text-[10px]">
+                            <div className="flex justify-between items-start mb-1">
+                              <span className="font-black text-slate-800 uppercase">{log.action}</span>
+                              <span className="text-slate-400 font-mono">
+                                {log.timestamp ? format(log.timestamp.toDate(), 'dd/MM/yy HH:mm') : '-'}
+                              </span>
+                            </div>
+                            <p className="text-slate-500 italic mb-1">{log.details}</p>
+                            <p className="text-[8px] text-slate-400 uppercase tracking-widest font-black text-right">Admin: {log.adminEmail}</p>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1061,7 +1495,7 @@ export default function MemberList({ isAdmin = false, lang }: { isAdmin?: boolea
                   className="flex-1 bg-red-600 text-white py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-red-200 hover:bg-red-700 transition-all flex items-center justify-center gap-2"
                 >
                   {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-                  Ya, Buang
+                  Sahkan Padam
                 </button>
               </div>
             </motion.div>

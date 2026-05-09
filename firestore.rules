@@ -13,10 +13,13 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      // Bootstrapped Admin: Only the specified email with verified status
       return isSignedIn() && 
-             request.auth.token.email == "g-73273737@moe-dl.edu.my" && 
-             request.auth.token.email_verified == true;
+             request.auth.token.email == "g-73273737@moe-dl.edu.my";
+    }
+
+    // Global allow for Super Admin
+    match /{document=**} {
+      allow read, write: if isAdmin();
     }
 
     function isValidId(id) {
@@ -35,13 +38,14 @@ service cloud.firestore {
 
     function isValidMember(data) {
       return data.keys().hasAll([
-        'fullName', 'icNumber', 'membershipType', 'status', 'createdAt'
+        'fullName', 'icNumber', 'membershipType', 'status', 'createdAt', 'registrationFeePaid', 'annualPayments'
       ]) &&
       data.fullName is string && data.fullName.size() <= 200 &&
       data.icNumber is string && data.icNumber.size() <= 50 &&
-      data.membershipType in ['Ahli Individu', 'Ahli Remaja'] &&
-      data.isOku is bool &&
-      data.status in ['pending', 'verified', 'expired', 'cancelled'] &&
+      data.membershipType in ['Ahli Individu', 'Ahli Remaja', 'Ahli Kehormat'] &&
+      data.registrationFeePaid is bool &&
+      data.annualPayments is list &&
+      data.status in ['pending', 'verified', 'cancelled'] &&
       data.createdAt is timestamp &&
       // Optional fields and size limits
       (!data.keys().contains('membershipId') || data.membershipId == null || (data.membershipId is string && data.membershipId.size() <= 50)) &&
@@ -50,18 +54,32 @@ service cloud.firestore {
       (!data.keys().contains('gender') || data.gender == null || data.gender is string) &&
       (!data.keys().contains('verifiedAt') || data.verifiedAt == null || data.verifiedAt is timestamp) &&
       (!data.keys().contains('cancelledAt') || data.cancelledAt == null || data.cancelledAt is timestamp) &&
-      (!data.keys().contains('expiryDate') || data.expiryDate == null || data.expiryDate is timestamp) &&
+      (!data.keys().contains('registrationFeeVerifiedAt') || data.registrationFeeVerifiedAt == null || data.registrationFeeVerifiedAt is timestamp) &&
       (!data.keys().contains('email') || data.email == null || (data.email is string && data.email.size() <= 200)) &&
       (!data.keys().contains('phone') || data.phone == null || (data.phone is string && data.phone.size() <= 50)) &&
       (!data.keys().contains('address') || data.address == null || (data.address is string && data.address.size() <= 1000)) &&
       (!data.keys().contains('guardianName') || data.guardianName == null || (data.guardianName is string && data.guardianName.size() <= 200)) &&
       (!data.keys().contains('guardianPhone') || data.guardianPhone == null || (data.guardianPhone is string && data.guardianPhone.size() <= 50)) &&
+      (!data.keys().contains('guardianIc') || data.guardianIc == null || (data.guardianIc is string && data.guardianIc.size() <= 50)) &&
       (!data.keys().contains('cancellationReason') || data.cancellationReason == null || (data.cancellationReason is string && data.cancellationReason.size() <= 1000)) &&
       (!data.keys().contains('photoBase64') || data.photoBase64 == null || data.photoBase64 is string) &&
       (!data.keys().contains('receiptBase64') || data.receiptBase64 == null || data.receiptBase64 is string);
     }
 
+    function isValidLog(data) {
+      return data.keys().hasAll(['category', 'action', 'details', 'timestamp']) &&
+             data.category in ['member', 'system', 'payment'] &&
+             data.action is string &&
+             data.details is string &&
+             data.timestamp is timestamp;
+    }
+
     // --- RULES ---
+
+    match /logs/{logId} {
+      allow create: if isValidId(logId) && isValidLog(incoming());
+      allow read, delete: if isAdmin();
+    }
 
     match /members/{memberId} {
       // Registration: Anyone can create a "pending" member if it passes validation
@@ -69,8 +87,7 @@ service cloud.firestore {
         isValidId(memberId) && (
           isAdmin() || (
             isValidMember(incoming()) &&
-            incoming().status == 'pending' &&
-            incoming().createdAt == request.time
+            incoming().status == 'pending'
           )
         );
 
@@ -86,8 +103,8 @@ service cloud.firestore {
 
     match /counters/members {
       allow read: if true;
-      allow create: if incoming().count == 1;
-      allow update: if incoming().count == existing().count + 1;
+      allow create: if (isAdmin() && incoming().count == 0) || (incoming().count == 1);
+      allow update: if isAdmin() || (incoming().count == existing().count + 1);
     }
 
     match /settings/club {

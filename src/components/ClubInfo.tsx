@@ -66,13 +66,12 @@ export default function ClubInfo({ settings, lang, setLang }: { settings: any, l
 
   const individu = registered.filter(m => m.membershipType === 'Ahli Individu');
   const remaja = registered.filter(m => m.membershipType === 'Ahli Remaja');
-  const totalOku = registered.filter(m => m.isOku);
+  const kehormat = registered.filter(m => m.membershipType === 'Ahli Kehormat');
 
   const individuStats = {
     count: individu.length,
     male: individu.filter(m => m.gender === 'Lelaki').length,
     female: individu.filter(m => m.gender === 'Perempuan').length,
-    oku: individu.filter(m => m.isOku).length,
     percentage: verifiedCount > 0 ? (individu.length / verifiedCount * 100).toFixed(1) : '0'
   };
 
@@ -80,8 +79,14 @@ export default function ClubInfo({ settings, lang, setLang }: { settings: any, l
     count: remaja.length,
     male: remaja.filter(m => m.gender === 'Lelaki').length,
     female: remaja.filter(m => m.gender === 'Perempuan').length,
-    oku: remaja.filter(m => m.isOku).length,
     percentage: verifiedCount > 0 ? (remaja.length / verifiedCount * 100).toFixed(1) : '0'
+  };
+
+  const kehormatStats = {
+    count: kehormat.length,
+    male: kehormat.filter(m => m.gender === 'Lelaki').length,
+    female: kehormat.filter(m => m.gender === 'Perempuan').length,
+    percentage: verifiedCount > 0 ? (kehormat.length / verifiedCount * 100).toFixed(1) : '0'
   };
 
   const getPercent = (count: number, total: number) => {
@@ -197,37 +202,33 @@ export default function ClubInfo({ settings, lang, setLang }: { settings: any, l
           <p className="text-slate-400 text-xs font-bold mt-2 uppercase tracking-wide">{current.statsSubtitle}</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          <div className="bento-card border-none bg-slate-50 flex items-center gap-4 p-5 hover:bg-slate-100 transition-colors">
-            <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-slate-400 shadow-sm">
-              <Users className="w-5 h-5" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="bento-card border-none bg-slate-50 flex flex-col items-center justify-center p-4 hover:bg-slate-100 transition-colors text-center">
+            <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center text-slate-400 shadow-sm mb-2">
+              <Users className="w-4 h-4" />
             </div>
-            <div>
-              <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">{current.totalApps}</p>
-              <p className="text-xl font-black text-slate-800 tracking-tighter">{totalAppsCount}</p>
-            </div>
+            <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">{current.totalApps}</p>
+            <p className="text-xl font-black text-slate-800 tracking-tighter">{totalAppsCount}</p>
           </div>
 
-          <div className="bento-card border-none bg-turquoise/5 flex items-center gap-4 p-5 hover:bg-turquoise/10 transition-colors">
-            <div className="w-10 h-10 bg-turquoise text-white rounded-xl flex items-center justify-center shadow-lg shadow-turquoise/20">
-              <Shield className="w-5 h-5" />
+          <div className="bento-card border-none bg-turquoise/5 flex flex-col items-center justify-center p-4 hover:bg-turquoise/10 transition-colors text-center">
+            <div className="w-8 h-8 bg-turquoise text-white rounded-lg flex items-center justify-center shadow-lg shadow-turquoise/20 mb-2">
+              <Shield className="w-4 h-4" />
             </div>
-            <div>
-              <p className="text-[8px] font-black text-turquoise-dark uppercase tracking-widest leading-none mb-1">{current.totalVerified}</p>
-              <p className="text-xl font-black text-turquoise tracking-tighter">{verifiedCount}</p>
-            </div>
+            <p className="text-[7px] font-black text-turquoise-dark uppercase tracking-widest leading-none mb-1">{current.totalVerified}</p>
+            <p className="text-xl font-black text-turquoise tracking-tighter">{verifiedCount}</p>
           </div>
 
-          <div className="bento-card border-none bg-purple-50 flex items-center gap-4 p-5 hover:bg-purple-100/50 transition-colors">
-            <div className="w-10 h-10 bg-purple-500 text-white rounded-xl flex items-center justify-center shadow-lg shadow-purple-200">
-              <User className="w-5 h-5" />
+          <div className="bento-card border-none bg-orange-50 flex flex-col items-center justify-center p-4 hover:bg-orange-100 transition-colors text-center">
+            <div className="w-8 h-8 bg-orange-500 text-white rounded-lg flex items-center justify-center shadow-lg shadow-orange-200 mb-2">
+              <Shield className="w-4 h-4" />
             </div>
-            <div>
-              <p className="text-[8px] font-black text-purple-600 uppercase tracking-widest leading-none mb-1">JUMLAH OKU</p>
-              <p className="text-xl font-black text-purple-700 tracking-tighter">{totalOku.length}</p>
-            </div>
+            <p className="text-[7px] font-black text-orange-600 uppercase tracking-widest leading-none mb-1">AHLI KEHORMAT</p>
+            <p className="text-xl font-black text-orange-700 tracking-tighter">{kehormatStats.count}</p>
           </div>
+        </div>
 
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {/* Membership Type Breakdown Cards - Individu */}
           <div className="bento-card border-2 border-slate-50 p-6 space-y-4">
             <div className="flex items-center justify-between">
@@ -253,18 +254,11 @@ export default function ClubInfo({ settings, lang, setLang }: { settings: any, l
                   <span className="text-[8px] font-bold text-pink-300">{getPercent(individuStats.female, individuStats.count)}</span>
                 </div>
               </div>
-              <div className="flex-1 bg-purple-50/50 p-2 rounded-xl">
-                <p className="text-[7px] font-black text-purple-400 uppercase tracking-widest mb-1">OKU</p>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-black text-purple-600">{individuStats.oku}</span>
-                  <span className="text-[8px] font-bold text-purple-300">{getPercent(individuStats.oku, individuStats.count)}</span>
-                </div>
-              </div>
             </div>
           </div>
 
           {/* Membership Type Breakdown Cards - Remaja */}
-          <div className="bento-card border-2 border-slate-50 col-span-1 md:col-span-2 p-6 space-y-4">
+          <div className="bento-card border-2 border-slate-50 p-6 space-y-4">
             <div className="flex items-center justify-between">
                 <h4 className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{current.remaja}</h4>
                 <span className="text-[10px] font-black text-orange-500 bg-orange-50 px-2 py-0.5 rounded-lg">{remajaStats.percentage}%</span>
@@ -288,11 +282,32 @@ export default function ClubInfo({ settings, lang, setLang }: { settings: any, l
                   <span className="text-[8px] font-bold text-pink-300">{getPercent(remajaStats.female, remajaStats.count)}</span>
                 </div>
               </div>
-              <div className="flex-1 bg-purple-50/50 p-2 rounded-xl">
-                <p className="text-[7px] font-black text-purple-400 uppercase tracking-widest mb-1">OKU</p>
+            </div>
+          </div>
+
+          {/* Membership Type Breakdown Cards - Kehormat */}
+          <div className="bento-card border-2 border-slate-50 p-6 space-y-4">
+            <div className="flex items-center justify-between">
+                <h4 className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{lang === 'bm' ? 'Ahli Kehormat' : 'Honorary Member'}</h4>
+                <span className="text-[10px] font-black text-orange-500 bg-orange-50 px-2 py-0.5 rounded-lg">{kehormatStats.percentage}%</span>
+            </div>
+            <div className="flex items-end gap-2">
+              <span className="text-2xl font-black text-slate-800">{kehormatStats.count}</span>
+              <span className="text-[8px] font-black text-slate-300 uppercase pb-1 tracking-widest">AHLI</span>
+            </div>
+            <div className="flex gap-2">
+              <div className="flex-1 bg-blue-50/50 p-2 rounded-xl">
+                <p className="text-[7px] font-black text-blue-400 uppercase tracking-widest mb-1">{current.male}</p>
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-black text-purple-600">{remajaStats.oku}</span>
-                  <span className="text-[8px] font-bold text-purple-300">{getPercent(remajaStats.oku, remajaStats.count)}</span>
+                  <span className="text-xs font-black text-blue-600">{kehormatStats.male}</span>
+                  <span className="text-[8px] font-bold text-blue-300">{getPercent(kehormatStats.male, kehormatStats.count)}</span>
+                </div>
+              </div>
+              <div className="flex-1 bg-pink-50/50 p-2 rounded-xl">
+                <p className="text-[7px] font-black text-pink-400 uppercase tracking-widest mb-1">{current.female}</p>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black text-pink-600">{kehormatStats.female}</span>
+                  <span className="text-[8px] font-bold text-pink-300">{getPercent(kehormatStats.female, kehormatStats.count)}</span>
                 </div>
               </div>
             </div>

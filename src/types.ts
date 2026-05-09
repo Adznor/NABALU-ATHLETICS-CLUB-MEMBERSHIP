@@ -1,6 +1,12 @@
-export type MembershipType = 'Ahli Individu' | 'Ahli Remaja';
+export type MembershipType = 'Ahli Individu' | 'Ahli Remaja' | 'Ahli Kehormat';
 
 export type MembershipStatus = 'pending' | 'verified' | 'expired' | 'cancelled';
+
+export interface AnnualPayment {
+  year: number;
+  paid: boolean;
+  verifiedAt?: any;
+}
 
 export interface Member {
   id?: string;
@@ -13,8 +19,8 @@ export interface Member {
   email: string;
   guardianName?: string;
   guardianPhone?: string;
+  guardianIc?: string;
   membershipType: MembershipType;
-  isOku: boolean;
   photoBase64?: string;
   receiptBase64?: string;
   membershipId?: string; // Generated after verification
@@ -23,8 +29,22 @@ export interface Member {
   createdAt: any; // Tarikh Permohonan
   verifiedAt?: any; // Tarikh Disahkan
   cancelledAt?: any; // Tarikh Dibatalkan
-  expiryDate?: any; // Tarikh Tamat Tempoh
   membershipNumber?: number;
+  // Treasurer fields
+  registrationFeePaid: boolean;
+  registrationFeeVerifiedAt?: any;
+  annualPayments: AnnualPayment[];
+}
+
+export interface LogEntry {
+  id?: string;
+  category: 'member' | 'system' | 'payment';
+  action: string;
+  details: string;
+  adminId?: string;
+  adminEmail?: string;
+  timestamp: any;
+  targetMemberId?: string;
 }
 
 export interface ClubSettings {
@@ -38,4 +58,5 @@ export interface ClubSettings {
   terms: string;
   termsPdfUrl?: string;
   bankInfo?: string;
+  registrationOpen: boolean;
 }

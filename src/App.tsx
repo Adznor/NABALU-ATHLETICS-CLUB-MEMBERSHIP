@@ -22,6 +22,7 @@ const DEFAULT_SETTINGS: ClubSettings = {
   mission: "Menyediakan latihan sukan berkualiti tinggi.",
   vision: "Menjadi kelab olahraga nombor satu di Sabah.",
   terms: "Saya bersetuju dengan terma dan syarat kelab.",
+  registrationOpen: true,
 };
 
 export default function App() {
@@ -35,7 +36,18 @@ export default function App() {
   useEffect(() => {
     const unsubSettings = onSnapshot(doc(db, 'settings', 'club'), (docSnap) => {
       if (docSnap.exists()) {
-        setSettings(docSnap.data() as ClubSettings);
+        const data = docSnap.data() as ClubSettings;
+        setSettings({
+          ...DEFAULT_SETTINGS,
+          ...data,
+          // Ensure registrationOpen explicitly defaults if missing
+          registrationOpen: data.registrationOpen !== undefined ? data.registrationOpen : true
+        });
+        
+        // Redirect to info if registration closed and currently on register tab
+        if (data.registrationOpen === false && activeTab === 'register') {
+          setActiveTab('info');
+        }
       }
       setLoading(false);
     });
@@ -93,6 +105,7 @@ export default function App() {
         isAdminMode={isAdminMode}
         setIsAdminMode={setIsAdminMode}
         lang={lang}
+        registrationOpen={settings.registrationOpen}
       />
 
       <main className="pb-32">

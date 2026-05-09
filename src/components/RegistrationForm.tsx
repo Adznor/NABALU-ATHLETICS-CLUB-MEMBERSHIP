@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { db, handleFirestoreError, OperationType, logActivity } from '../lib/firebase';
 import { collection, addDoc, serverTimestamp, runTransaction, doc, getDoc } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
 import { CheckCircle, Upload, Loader2, Info } from 'lucide-react';
@@ -10,7 +10,6 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
   const [formData, setFormData] = useState<Partial<Member>>({
     gender: 'Lelaki',
     membershipType: 'Ahli Individu',
-    isOku: false,
     status: 'pending',
     dob: '',
     phone: '',
@@ -18,6 +17,11 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
     address: '',
     icNumber: '',
     fullName: '',
+    guardianName: '',
+    guardianPhone: '',
+    guardianIc: '',
+    registrationFeePaid: false,
+    annualPayments: [],
   });
 
   const t = {
@@ -36,6 +40,7 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
       guardianTitle: "Maklumat Penjaga (Wajib untuk Ahli Remaja)",
       guardianName: "Nama Penjaga",
       guardianPhone: "No. Telefon Penjaga",
+      guardianIc: "No. Kad Pengenalan Penjaga",
       documents: "3. Dokumen",
       photoLabel: "Gambar Profil",
       receiptLabel: "Resit Pembayaran",
@@ -55,9 +60,6 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
       submitError: "Gagal menghantar permohonan. Sila cuba lagi.",
       delete: "Padam",
       mandatory: "(Wajib)",
-      okuLabel: "Status OKU",
-      okuYes: "YA (Orang Kurang Upaya)",
-      okuNo: "TIDAK",
     },
     en: {
       title: "Application Form",
@@ -74,6 +76,7 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
       guardianTitle: "Guardian Information (Mandatory for Youth Members)",
       guardianName: "Guardian Name",
       guardianPhone: "Guardian Phone",
+      guardianIc: "Guardian IC Number",
       documents: "3. Documents",
       photoLabel: "Profile Picture",
       receiptLabel: "Payment Receipt",
@@ -93,9 +96,6 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
       submitError: "Failed to submit application. Please try again.",
       delete: "Delete",
       mandatory: "(Mandatory)",
-      okuLabel: "Status OKU",
-      okuYes: "YA (Orang Kurang Upaya)",
-      okuNo: "TIDAK",
     }
   };
 
@@ -175,8 +175,16 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
         createdAt: serverTimestamp(),
       };
 
-      await addDoc(collection(db, 'members'), newMember);
-      setSuccessId('PENDING'); // Just a flag to show success UI
+      const docRef = await addDoc(collection(db, 'members'), newMember);
+      
+      logActivity({
+        category: 'member',
+        action: 'New Membership Application',
+        details: `New application submitted by ${newMember.fullName}.`,
+        targetMemberId: docRef.id
+      });
+
+      setSuccessId('PENDING'); 
       window.scrollTo(0, 0);
     } catch (err: any) {
       handleFirestoreError(err, OperationType.WRITE, 'members');
@@ -229,18 +237,18 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
           <h3 className="text-sm font-black text-slate-800 uppercase mb-6 tracking-wider flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-turquoise"></span> {current.membershipType}
           </h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <button
               type="button"
               onClick={() => { setMembershipType('Ahli Individu'); setFormData({...formData, membershipType: 'Ahli Individu'}) }}
-              className={`p-6 rounded-2xl border-2 transition-all text-left ${
+              className={`p-6 rounded-2xl border-2 transition-all text-left flex flex-col ${
                 membershipType === 'Ahli Individu' 
                 ? 'border-turquoise bg-turquoise/5 shadow-inner' 
                 : 'border-slate-50 hover:border-turquoise/20'
               }`}
             >
               <p className="font-black text-base text-slate-800 uppercase tracking-tighter">Ahli Individu</p>
-              <p className="text-[10px] font-bold text-slate-500 mt-2 leading-tight">Terbuka kepada orang awam, ibu, bapa atau penjaga ahli remaja.</p>
+              <p className="text-[10px] font-bold text-slate-500 mt-2 leading-tight flex-grow">Individu-individu yang berumur lapan belas (18) tahun ke atas.</p>
               <div className="mt-4 pt-4 border-t border-slate-100">
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Yuran Keahlian: RM50</p>
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Yuran Tahunan: RM50</p>
@@ -249,44 +257,35 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
             <button
               type="button"
               onClick={() => { setMembershipType('Ahli Remaja'); setFormData({...formData, membershipType: 'Ahli Remaja'}) }}
-              className={`p-6 rounded-2xl border-2 transition-all text-left ${
+              className={`p-6 rounded-2xl border-2 transition-all text-left flex flex-col ${
                 membershipType === 'Ahli Remaja' 
                 ? 'border-turquoise bg-turquoise/5 shadow-inner' 
                 : 'border-slate-50 hover:border-turquoise/20'
               }`}
             >
               <p className="font-black text-base text-slate-800 uppercase tracking-tighter">Ahli Remaja</p>
-              <p className="text-[10px] font-bold text-slate-500 mt-2 leading-tight">Terbuka kepada semua atlet 18 tahun ke bawah.</p>
+              <p className="text-[10px] font-bold text-slate-500 mt-2 leading-tight flex-grow">Individu-individu yang berumur di bawah lapan belas (18) tahun yang mendapat kebenaran bertulis daripada ibu bapa / penjaga.</p>
               <div className="mt-4 pt-4 border-t border-slate-100">
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Yuran Keahlian: RM5</p>
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Yuran Tahunan: RM10</p>
               </div>
             </button>
-          </div>
-
-          <div className="mt-8 pt-8 border-t border-slate-50">
-            <label className="label-bento mb-4">{current.okuLabel}</label>
-            <div className="grid grid-cols-2 gap-4">
-              <button
-                type="button"
-                onClick={() => setFormData({ ...formData, isOku: true })}
-                className={`flex items-center justify-center p-4 rounded-xl border-2 font-black text-[10px] tracking-widest transition-all ${formData.isOku ? 'border-purple-500 bg-purple-50 text-purple-600' : 'border-slate-50 text-slate-400'}`}
-              >
-                {current.okuYes}
-              </button>
-              <button
-                type="button"
-                onClick={() => setFormData({ ...formData, isOku: false })}
-                className={`flex items-center justify-center p-4 rounded-xl border-2 font-black text-[10px] tracking-widest transition-all ${!formData.isOku ? 'border-turquoise bg-turquoise/5 text-turquoise' : 'border-slate-50 text-slate-400'}`}
-              >
-                {current.okuNo}
-              </button>
-            </div>
-            {formData.isOku && (
-              <p className="mt-3 text-[9px] font-black text-purple-500 uppercase tracking-widest animate-pulse flex items-center gap-2">
-                <Info className="w-3 h-3" /> Yuran Keahlian & Tahunan: PERCUMA UNTUK OKU
-              </p>
-            )}
+            <button
+              type="button"
+              onClick={() => { setMembershipType('Ahli Kehormat'); setFormData({...formData, membershipType: 'Ahli Kehormat'}) }}
+              className={`p-6 rounded-2xl border-2 transition-all text-left flex flex-col ${
+                membershipType === 'Ahli Kehormat' 
+                ? 'border-turquoise bg-turquoise/5 shadow-inner' 
+                : 'border-slate-50 hover:border-turquoise/20'
+              }`}
+            >
+              <p className="font-black text-base text-slate-800 uppercase tracking-tighter">Ahli Kehormat</p>
+              <p className="text-[10px] font-bold text-slate-500 mt-2 leading-tight flex-grow">Individu-individu yang pernah berjasa kepada Kelab atau individu-individu yang boleh memberi sumbangan kepada Kelab.</p>
+              <div className="mt-4 pt-4 border-t border-slate-100">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Yuran Keahlian: RM2</p>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Yuran Tahunan: RM0</p>
+              </div>
+            </button>
           </div>
         </section>
 
@@ -298,34 +297,34 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="md:col-span-2">
               <label className="label-bento">{current.fullName}</label>
-              <input required type="text" className="input-bento" placeholder="..." value={formData.fullName} onChange={(e) => setFormData({ ...formData, fullName: e.target.value })} />
+              <input required type="text" className="input-bento" placeholder="..." value={formData.fullName || ''} onChange={(e) => setFormData({ ...formData, fullName: e.target.value })} />
             </div>
             <div>
               <label className="label-bento">{current.icNumber}</label>
-              <input required type="text" className="input-bento" placeholder="000101-12-0000" value={formData.icNumber} onChange={(e) => handleICChange(e.target.value)} />
+              <input required type="text" className="input-bento" placeholder="000101-12-0000" value={formData.icNumber || ''} onChange={(e) => handleICChange(e.target.value)} />
             </div>
             <div>
               <label className="label-bento">{current.dob}</label>
-              <input required type="date" className="input-bento" value={formData.dob} onChange={(e) => setFormData({ ...formData, dob: e.target.value })} />
+              <input required type="date" className="input-bento" value={formData.dob || ''} onChange={(e) => setFormData({ ...formData, dob: e.target.value })} />
             </div>
             <div>
               <label className="label-bento">{current.gender}</label>
-              <select className="input-bento" value={formData.gender} onChange={(e) => setFormData({ ...formData, gender: e.target.value as any })}>
+              <select className="input-bento" value={formData.gender || ''} onChange={(e) => setFormData({ ...formData, gender: e.target.value as any })}>
                 <option value="Lelaki">{lang === 'bm' ? 'Lelaki' : 'Male'}</option>
                 <option value="Perempuan">{lang === 'bm' ? 'Perempuan' : 'Female'}</option>
               </select>
             </div>
             <div>
               <label className="label-bento">{current.phone}</label>
-              <input type="tel" className="input-bento" placeholder="012-3456789" value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} />
+              <input type="tel" className="input-bento" placeholder="012-3456789" value={formData.phone || ''} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} />
             </div>
             <div className="md:col-span-2">
               <label className="label-bento">{current.email}</label>
-              <input type="email" className="input-bento" placeholder="contoh@email.com" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} />
+              <input type="email" className="input-bento" placeholder="contoh@email.com" value={formData.email || ''} onChange={(e) => setFormData({ ...formData, email: e.target.value })} />
             </div>
             <div className="md:col-span-2">
               <label className="label-bento">{current.address}</label>
-              <input type="text" className="input-bento" placeholder="..." value={formData.address} onChange={(e) => setFormData({ ...formData, address: e.target.value })} />
+              <input type="text" className="input-bento" placeholder="..." value={formData.address || ''} onChange={(e) => setFormData({ ...formData, address: e.target.value })} />
             </div>
           </div>
 
@@ -336,14 +335,18 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
               className="mt-8 pt-8 border-t border-slate-50"
             >
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6">{current.guardianTitle}</p>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div>
                   <label className="label-bento">{current.guardianName}</label>
-                  <input type="text" required className="input-bento" value={formData.guardianName} onChange={(e) => setFormData({ ...formData, guardianName: e.target.value })} />
+                  <input type="text" required className="input-bento" value={formData.guardianName || ''} onChange={(e) => setFormData({ ...formData, guardianName: e.target.value })} />
+                </div>
+                <div>
+                  <label className="label-bento">{current.guardianIc}</label>
+                  <input type="text" required className="input-bento" placeholder="000000-00-0000" value={formData.guardianIc || ''} onChange={(e) => setFormData({ ...formData, guardianIc: e.target.value })} />
                 </div>
                 <div>
                   <label className="label-bento">{current.guardianPhone}</label>
-                  <input type="tel" required className="input-bento" value={formData.guardianPhone} onChange={(e) => setFormData({ ...formData, guardianPhone: e.target.value })} />
+                  <input type="tel" required className="input-bento" value={formData.guardianPhone || ''} onChange={(e) => setFormData({ ...formData, guardianPhone: e.target.value })} />
                 </div>
               </div>
             </motion.div>

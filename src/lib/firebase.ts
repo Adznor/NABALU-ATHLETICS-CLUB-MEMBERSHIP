@@ -1,13 +1,35 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
-import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
+import { getFirestore, doc, getDocFromServer, collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
+import { LogEntry } from '../types';
 
 const app = initializeApp(firebaseConfig);
 // @ts-ignore
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
+
+export async function logActivity(entry: Omit<LogEntry, 'id' | 'timestamp' | 'adminId' | 'adminEmail'>) {
+  try {
+    const user = auth.currentUser;
+    const logData: any = {
+      ...entry,
+      timestamp: serverTimestamp()
+    };
+
+    if (user) {
+      logData.adminId = user.uid;
+      logData.adminEmail = user.email || 'unknown';
+    } else {
+      logData.adminEmail = 'SYSTEM / PUBLIC';
+    }
+
+    await addDoc(collection(db, 'logs'), logData);
+  } catch (error) {
+    console.error('Failed to log activity:', error);
+  }
+}
 
 export enum OperationType {
   CREATE = 'create',
