@@ -73,7 +73,22 @@ service cloud.firestore {
              data.timestamp is timestamp;
     }
 
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'authProvider', 'createdAt']) &&
+             data.uid is string && data.email is string &&
+             data.authProvider in ['google', 'email'] &&
+             data.createdAt is timestamp &&
+             (!data.keys().contains('displayName') || data.displayName is string) &&
+             (!data.keys().contains('password') || data.password is string);
+    }
+
     // --- RULES ---
+
+    match /users/{userId} {
+      allow read: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+      allow create, update: if isSignedIn() && request.auth.uid == userId && isValidUser(incoming());
+      allow delete: if isAdmin();
+    }
 
     match /logs/{logId} {
       allow create: if isValidId(logId) && isValidLog(incoming());

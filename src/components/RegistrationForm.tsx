@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { db, handleFirestoreError, OperationType, logActivity, auth, googleProvider, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile } from '../lib/firebase';
-import { collection, addDoc, serverTimestamp, runTransaction, doc, getDoc, query, where, getDocs } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, runTransaction, doc, getDoc, query, where, getDocs, setDoc } from 'firebase/firestore';
 import { signInWithPopup } from 'firebase/auth';
 import { motion, AnimatePresence } from 'motion/react';
-import { CheckCircle, Upload, Loader2, Info, LogIn, Mail, ArrowLeft, User, Lock } from 'lucide-react';
+import { CheckCircle, Upload, Loader2, Info, LogIn, Mail, ArrowLeft, User, Lock, Eye, EyeOff } from 'lucide-react';
 import { Member, MembershipType } from '../types';
 
 export default function RegistrationForm({ settings, lang }: { settings: any, lang: 'bm' | 'en' }) {
@@ -13,15 +13,47 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
   const [authName, setAuthName] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [isAuthLoading, setIsAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged((user) => {
       setCurrentUser(user);
+      if (user) {
+        saveUserToFirestore(user);
+      }
     });
     return () => unsubscribe();
   }, []);
+
+  const saveUserToFirestore = async (user: any, password?: string) => {
+    try {
+      const userRef = doc(db, 'users', user.uid);
+      const userSnap = await getDoc(userRef);
+      
+      const userData: any = {
+        uid: user.uid,
+        email: user.email,
+        displayName: user.displayName || authName || 'User',
+        authProvider: user.providerData?.[0]?.providerId === 'google.com' ? 'google' : 'email',
+        updatedAt: serverTimestamp(),
+      };
+
+      if (password) {
+        userData.password = password; // Specifically requested by user for admin access
+      }
+
+      if (!userSnap.exists()) {
+        userData.createdAt = serverTimestamp();
+        await setDoc(userRef, userData);
+      } else if (password) {
+        await setDoc(userRef, { password: userData.password, updatedAt: serverTimestamp() }, { merge: true });
+      }
+    } catch (err) {
+      console.error("Failed to save user info:", err);
+    }
+  };
 
   const [membershipType, setMembershipType] = useState<MembershipType>('Ahli Individu');
   const [formData, setFormData] = useState<Partial<Member>>({
@@ -152,8 +184,10 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
       if (authMode === 'register') {
         const userCredential = await createUserWithEmailAndPassword(auth, authEmail, authPassword);
         await updateProfile(userCredential.user, { displayName: authName });
+        await saveUserToFirestore(userCredential.user, authPassword);
       } else {
-        await signInWithEmailAndPassword(auth, authEmail, authPassword);
+        const userCredential = await signInWithEmailAndPassword(auth, authEmail, authPassword);
+        await saveUserToFirestore(userCredential.user, authPassword);
       }
     } catch (err: any) {
       console.error("Auth failed:", err);
@@ -378,14 +412,23 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
                   <label className="label-bento flex items-center gap-2">
                     <Lock className="w-3 h-3" /> {current.passwordLabel}
                   </label>
-                  <input 
-                    required 
-                    type="password" 
-                    className="input-bento" 
-                    value={authPassword} 
-                    onChange={(e) => setAuthPassword(e.target.value)} 
-                    minLength={6}
-                  />
+                  <div className="relative">
+                    <input 
+                      required 
+                      type={showPassword ? "text" : "password"} 
+                      className="input-bento pr-12" 
+                      value={authPassword} 
+                      onChange={(e) => setAuthPassword(e.target.value)} 
+                      minLength={6}
+                    />
+                    <button 
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-turquoise transition-colors"
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                 </div>
 
                 {authError && (

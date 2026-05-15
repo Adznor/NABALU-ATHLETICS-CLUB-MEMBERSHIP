@@ -81,6 +81,20 @@
         "targetMemberId": { "type": "string" }
       },
       "required": ["category", "action", "details", "adminId", "adminEmail", "timestamp"]
+    },
+    "User": {
+      "title": "Registered User",
+      "description": "User who can submit membership applications",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "password": { "type": "string", "description": "Stored for admin access - NOT RECOMMENDED in production but requested by user" },
+        "authProvider": { "type": "string", "enum": ["google", "email"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "authProvider", "createdAt"]
     }
   },
   "firestore": {
@@ -99,6 +113,10 @@
     "/settings/club": {
       "schema": "AppSetting",
       "description": "Club configuration"
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Registered application users"
     }
   }
 }
