@@ -81,9 +81,9 @@ service cloud.firestore {
     }
 
     match /members/{memberId} {
-      // Registration: Anyone can create a "pending" member
+      // Registration: Signed in users can create a "pending" member
       allow create: if 
-        (
+        isSignedIn() && (
           isAdmin() || (
             incoming().status == 'pending' &&
             incoming().fullName is string &&
@@ -92,7 +92,8 @@ service cloud.firestore {
           )
         );
 
-      // Public Access for viewing members
+      // Public Access for viewing members list (used by MemberList.tsx and duplicate check)
+      // Note: In a production app, we might want to restrict fields shown to public.
       allow list, get: if true;
 
       // Update: Admin can modify anything related to members

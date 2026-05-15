@@ -296,7 +296,24 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
   }
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
+    <div className="max-w-4xl mx-auto px-4 mt-8 pb-12">
+      <div className="bg-white/50 backdrop-blur-md p-4 rounded-3xl mb-8 flex flex-col md:flex-row items-center justify-between gap-4 border border-white/20">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl overflow-hidden shadow-lg border-2 border-white">
+            <img src={currentUser.photoURL || `https://ui-avatars.com/api/?name=${currentUser.displayName}`} alt="Profile" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+          </div>
+          <div>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Berdaftar Sebagai</p>
+            <p className="text-sm font-bold text-slate-700 leading-none">{currentUser.displayName || currentUser.email}</p>
+          </div>
+        </div>
+        <button 
+          onClick={() => auth.signOut()}
+          className="px-6 py-2 bg-slate-900/5 hover:bg-slate-900/10 text-slate-600 font-bold text-[10px] uppercase tracking-widest rounded-xl transition-all"
+        >
+          {lang === 'bm' ? 'Tukar Akaun' : 'Switch Account'}
+        </button>
+      </div>
       <div className="mb-12">
         <h2 className="text-4xl font-black text-slate-800 tracking-tighter italic">{current.title}</h2>
         <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest">{current.clubName}</p>
