@@ -95,8 +95,14 @@ export default function ClubInfo({ settings, lang, setLang }: { settings: any, l
   };
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-12 md:py-20 space-y-24">
-      {/* ... (Hero section remains mostly same) ... */}
+    <div className="relative max-w-4xl mx-auto px-4 py-12 md:py-20 space-y-24 overflow-hidden">
+      {/* Background Watermark Logo */}
+      {settings?.logoBase64 && (
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[150%] h-[150%] opacity-[0.03] pointer-events-none -z-10 rotate-12">
+          <img src={settings.logoBase64} alt="" className="w-full h-full object-contain" />
+        </div>
+      )}
+      
       <section className="space-y-12">
         <div className="flex justify-center">
           <div className="bg-slate-100 p-1 rounded-2xl flex items-center gap-1">
@@ -202,29 +208,21 @@ export default function ClubInfo({ settings, lang, setLang }: { settings: any, l
           <p className="text-slate-400 text-xs font-bold mt-2 uppercase tracking-wide">{current.statsSubtitle}</p>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          <div className="bento-card border-none bg-slate-50 flex flex-col items-center justify-center p-4 hover:bg-slate-100 transition-colors text-center">
-            <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center text-slate-400 shadow-sm mb-2">
-              <Users className="w-4 h-4" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="bento-card border-none bg-slate-50 flex flex-col items-center justify-center p-6 hover:bg-slate-100 transition-colors text-center">
+            <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-slate-400 shadow-sm mb-3">
+              <Users className="w-5 h-5" />
             </div>
-            <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">{current.totalApps}</p>
-            <p className="text-xl font-black text-slate-800 tracking-tighter">{totalAppsCount}</p>
+            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">{current.totalApps}</p>
+            <p className="text-2xl font-black text-slate-800 tracking-tighter">{totalAppsCount}</p>
           </div>
 
-          <div className="bento-card border-none bg-turquoise/5 flex flex-col items-center justify-center p-4 hover:bg-turquoise/10 transition-colors text-center">
-            <div className="w-8 h-8 bg-turquoise text-white rounded-lg flex items-center justify-center shadow-lg shadow-turquoise/20 mb-2">
-              <Shield className="w-4 h-4" />
+          <div className="bento-card border-none bg-turquoise/5 flex flex-col items-center justify-center p-6 hover:bg-turquoise/10 transition-colors text-center">
+            <div className="w-10 h-10 bg-turquoise text-white rounded-xl flex items-center justify-center shadow-lg shadow-turquoise/20 mb-3">
+              <Shield className="w-5 h-5" />
             </div>
-            <p className="text-[7px] font-black text-turquoise-dark uppercase tracking-widest leading-none mb-1">{current.totalVerified}</p>
-            <p className="text-xl font-black text-turquoise tracking-tighter">{verifiedCount}</p>
-          </div>
-
-          <div className="bento-card border-none bg-orange-50 flex flex-col items-center justify-center p-4 hover:bg-orange-100 transition-colors text-center">
-            <div className="w-8 h-8 bg-orange-500 text-white rounded-lg flex items-center justify-center shadow-lg shadow-orange-200 mb-2">
-              <Shield className="w-4 h-4" />
-            </div>
-            <p className="text-[7px] font-black text-orange-600 uppercase tracking-widest leading-none mb-1">AHLI KEHORMAT</p>
-            <p className="text-xl font-black text-orange-700 tracking-tighter">{kehormatStats.count}</p>
+            <p className="text-[8px] font-black text-turquoise-dark uppercase tracking-widest leading-none mb-1">{current.totalVerified}</p>
+            <p className="text-2xl font-black text-turquoise tracking-tighter">{verifiedCount}</p>
           </div>
         </div>
 

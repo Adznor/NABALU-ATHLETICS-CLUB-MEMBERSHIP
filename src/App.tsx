@@ -68,14 +68,19 @@ export default function App() {
 
   const handleAdminLogin = async () => {
     try {
+      googleProvider.setCustomParameters({ prompt: 'select_account' });
       const result = await signInWithPopup(auth, googleProvider);
-      if (result.user.email !== 'g-73273737@moe-dl.edu.my') {
-        alert("Akses dinafikan. Email anda bukan admin berdaftar.");
+      const user = result.user;
+      
+      if (user.email === 'g-73273737@moe-dl.edu.my') {
+        setIsAdminAuthenticated(true);
+      } else {
+        alert("Akses dinafikan. Email anda (" + user.email + ") bukan admin berdaftar.");
         await auth.signOut();
       }
     } catch (err) {
       console.error(err);
-      alert("Gagal log masuk.");
+      alert("Gagal log masuk. Sila pastikan anda menggunakan akaun Google yang betul.");
     }
   };
 
