@@ -1,13 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { db, handleFirestoreError, OperationType, logActivity, auth, googleProvider } from '../lib/firebase';
+import { db, handleFirestoreError, OperationType, logActivity, auth, googleProvider, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile } from '../lib/firebase';
 import { collection, addDoc, serverTimestamp, runTransaction, doc, getDoc, query, where, getDocs } from 'firebase/firestore';
 import { signInWithPopup } from 'firebase/auth';
 import { motion, AnimatePresence } from 'motion/react';
-import { CheckCircle, Upload, Loader2, Info, LogIn } from 'lucide-react';
+import { CheckCircle, Upload, Loader2, Info, LogIn, Mail, ArrowLeft, User, Lock } from 'lucide-react';
 import { Member, MembershipType } from '../types';
 
 export default function RegistrationForm({ settings, lang }: { settings: any, lang: 'bm' | 'en' }) {
   const [currentUser, setCurrentUser] = useState(auth.currentUser);
+  const [isEmailMode, setIsEmailMode] = useState(false);
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authName, setAuthName] = useState('');
+  const [isAuthLoading, setIsAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged((user) => {
@@ -73,6 +80,15 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
       loginTitle: "Log Masuk Diperlukan",
       loginDesc: "Sila log masuk menggunakan akaun Google untuk meneruskan pendaftaran.",
       loginBtn: "Log Masuk dengan Google",
+      loginEmailBtn: "Klik Sini Jika Gagal Log Masuk Google",
+      registerTitle: "Daftar Akaun",
+      loginEmailTitle: "Log Masuk Email",
+      emailLabel: "Alamat Email",
+      passwordLabel: "Kata Laluan",
+      nameLabel: "Nama Penuh",
+      registerBtn: "Daftar Sekarang",
+      hasAccount: "Sudah ada akaun? Log masuk",
+      noAccount: "Tiada akaun? Daftar sekarang",
       duplicateIC: "Nombor kad pengenalan ini telah didaftarkan dalam sistem.",
     },
     en: {
@@ -113,11 +129,43 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
       loginTitle: "Login Required",
       loginDesc: "Please login with your Google account to proceed with registration.",
       loginBtn: "Login with Google",
+      loginEmailBtn: "Click Here if Google Login Fails",
+      registerTitle: "Register Account",
+      loginEmailTitle: "Email Login",
+      emailLabel: "Email Address",
+      passwordLabel: "Password",
+      nameLabel: "Full Name",
+      registerBtn: "Register Now",
+      hasAccount: "Already have an account? Login",
+      noAccount: "No account? Register now",
       duplicateIC: "This identity card number is already registered in the system.",
     }
   };
 
   const current = t[lang];
+
+  const handleEmailAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsAuthLoading(true);
+    setAuthError(null);
+    try {
+      if (authMode === 'register') {
+        const userCredential = await createUserWithEmailAndPassword(auth, authEmail, authPassword);
+        await updateProfile(userCredential.user, { displayName: authName });
+      } else {
+        await signInWithEmailAndPassword(auth, authEmail, authPassword);
+      }
+    } catch (err: any) {
+      console.error("Auth failed:", err);
+      let msg = lang === 'bm' ? "Gagal log masuk/daftar. Sila cuba lagi." : "Auth failed. Please try again.";
+      if (err.code === 'auth/email-already-in-use') msg = lang === 'bm' ? "Email telah digunakan." : "Email already in use.";
+      if (err.code === 'auth/weak-password') msg = lang === 'bm' ? "Kata laluan terlalu lemah (min 6 aksara)." : "Password too weak.";
+      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') msg = lang === 'bm' ? "Email atau kata laluan salah." : "Invalid email or password.";
+      setAuthError(msg);
+    } finally {
+      setIsAuthLoading(false);
+    }
+  };
 
   const handleICChange = (ic: string) => {
     // Only proceed if it looks like a valid IC start (YYMMDD)
@@ -240,27 +288,143 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="max-w-md mx-auto bg-white p-12 rounded-[2.5rem] shadow-2xl text-center border border-slate-100 mt-12"
+        className="max-w-md mx-auto bg-white p-8 md:p-12 rounded-[2.5rem] shadow-2xl border border-slate-100 mt-12"
       >
-        <div className="w-20 h-20 bg-turquoise/10 flex items-center justify-center rounded-3xl mx-auto mb-8">
-          <LogIn className="w-10 h-10 text-turquoise" />
-        </div>
-        <h2 className="text-3xl font-black text-slate-800 mb-4 tracking-tight">{current.loginTitle}</h2>
-        <p className="text-slate-500 font-medium text-sm leading-relaxed mb-10">
-          {current.loginDesc}
-        </p>
-        <button 
-          onClick={handleLogin}
-          className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-2xl flex items-center justify-center gap-3 transition-all active:scale-[0.98] shadow-xl shadow-slate-200"
-        >
-          <svg className="w-5 h-5" viewBox="0 0 24 24">
-            <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-            <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-            <path fill="currentColor" d="M5.84 14.1c-.22-.66-.35-1.36-.35-2.1s.13-1.44.35-2.1V7.06H2.18c-.74 1.48-1.18 3.14-1.18 4.94s.44 3.46 1.18 4.94l3.66-2.84z"/>
-            <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
-          </svg>
-          {current.loginBtn}
-        </button>
+        <AnimatePresence mode="wait">
+          {!isEmailMode ? (
+            <motion.div 
+              key="google-mode"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              className="text-center"
+            >
+              <div className="w-20 h-20 bg-turquoise/10 flex items-center justify-center rounded-3xl mx-auto mb-8">
+                <LogIn className="w-10 h-10 text-turquoise" />
+              </div>
+              <h2 className="text-3xl font-black text-slate-800 mb-4 tracking-tight">{current.loginTitle}</h2>
+              <p className="text-slate-500 font-medium text-sm leading-relaxed mb-10">
+                {current.loginDesc}
+              </p>
+              <button 
+                onClick={handleLogin}
+                className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-2xl flex items-center justify-center gap-3 transition-all active:scale-[0.98] shadow-xl shadow-slate-200 mb-6"
+              >
+                <svg className="w-5 h-5" viewBox="0 0 24 24">
+                  <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                  <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                  <path fill="currentColor" d="M5.84 14.1c-.22-.66-.35-1.36-.35-2.1s.13-1.44.35-2.1V7.06H2.18c-.74 1.48-1.18 3.14-1.18 4.94s.44 3.46 1.18 4.94l3.66-2.84z"/>
+                  <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+                </svg>
+                {current.loginBtn}
+              </button>
+
+              <button 
+                onClick={() => setIsEmailMode(true)}
+                className="text-[10px] font-black text-turquoise uppercase tracking-widest hover:underline"
+              >
+                {current.loginEmailBtn}
+              </button>
+            </motion.div>
+          ) : (
+            <motion.div 
+              key="email-mode"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+            >
+              <button 
+                onClick={() => { setIsEmailMode(false); setAuthError(null); }}
+                className="mb-8 flex items-center gap-2 text-slate-400 font-bold text-[10px] uppercase tracking-widest hover:text-slate-600 transition-colors"
+              >
+                <ArrowLeft className="w-3 h-3" /> {lang === 'bm' ? 'Kembali ke Google' : 'Back to Google'}
+              </button>
+
+              <div className="w-16 h-16 bg-slate-900 text-white flex items-center justify-center rounded-2xl mb-6">
+                <Mail className="w-8 h-8" />
+              </div>
+              <h2 className="text-2xl font-black text-slate-800 mb-6 tracking-tight">
+                {authMode === 'register' ? current.registerTitle : current.loginEmailTitle}
+              </h2>
+
+              <form onSubmit={handleEmailAuth} className="space-y-4">
+                {authMode === 'register' && (
+                  <div className="space-y-2">
+                    <label className="label-bento flex items-center gap-2">
+                       <User className="w-3 h-3" /> {current.nameLabel}
+                    </label>
+                    <input 
+                      required 
+                      type="text" 
+                      className="input-bento" 
+                      value={authName} 
+                      onChange={(e) => setAuthName(e.target.value)} 
+                    />
+                  </div>
+                )}
+                <div className="space-y-2">
+                  <label className="label-bento flex items-center gap-2">
+                    <Mail className="w-3 h-3" /> {current.emailLabel}
+                  </label>
+                  <input 
+                    required 
+                    type="email" 
+                    className="input-bento" 
+                    value={authEmail} 
+                    onChange={(e) => setAuthEmail(e.target.value)} 
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="label-bento flex items-center gap-2">
+                    <Lock className="w-3 h-3" /> {current.passwordLabel}
+                  </label>
+                  <input 
+                    required 
+                    type="password" 
+                    className="input-bento" 
+                    value={authPassword} 
+                    onChange={(e) => setAuthPassword(e.target.value)} 
+                    minLength={6}
+                  />
+                </div>
+
+                {authError && (
+                  <div className="p-3 bg-red-50 border border-red-100 rounded-xl text-[10px] font-bold text-red-500 uppercase tracking-tight">
+                    {authError}
+                  </div>
+                )}
+
+                <button 
+                  disabled={isAuthLoading}
+                  className="w-full py-4 bg-turquoise hover:bg-turquoise-dark text-white font-black rounded-2xl flex items-center justify-center gap-3 transition-all active:scale-[0.98] shadow-xl shadow-turquoise/20 mt-4 h-[56px]"
+                >
+                  {isAuthLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : (authMode === 'register' ? current.registerBtn : current.loginEmailTitle)}
+                </button>
+
+                <div className="text-center pt-4">
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      setAuthMode(authMode === 'login' ? 'register' : 'login');
+                      setAuthError(null);
+                    }}
+                    className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-turquoise transition-colors"
+                  >
+                    {authMode === 'login' ? current.noAccount : current.hasAccount}
+                  </button>
+                </div>
+
+                <div className="p-4 bg-amber-50 border border-amber-100 rounded-2xl mt-6">
+                  <p className="text-[9px] font-bold text-amber-700 leading-tight">
+                    {lang === 'bm' 
+                      ? "NOTA: Sila pastikan penyedia 'Email/Password' telah diaktifkan dalam Firebase Console anda."
+                      : "NOTE: Please ensure 'Email/Password' provider is enabled in your Firebase Console."}
+                  </p>
+                </div>
+              </form>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </motion.div>
     );
   }
