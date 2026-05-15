@@ -22,7 +22,10 @@ export default function AdminPanel({ onLogout, settings, lang }: { onLogout: () 
   const [logSearchTerm, setLogSearchTerm] = useState('');
   const [logCategoryFilter, setLogCategoryFilter] = useState<string>('all');
   const [showResetModal, setShowResetModal] = useState(false);
+  const [resetStep, setResetStep] = useState<1 | 2 | 3>(1);
   const [resetPassword, setResetPassword] = useState('');
+  const [verificationCode, setVerificationCode] = useState('');
+  const [inputVerificationCode, setInputVerificationCode] = useState('');
   const [isResetting, setIsResetting] = useState(false);
 
   const SUPER_ADMIN_EMAIL = 'g-73273737@moe-dl.edu.my';
@@ -150,15 +153,35 @@ export default function AdminPanel({ onLogout, settings, lang }: { onLogout: () 
     }
   };
 
-  const handleResetSystem = async () => {
-    if (resetPassword !== 'Adzeem1312') {
-      alert("Kata laluan salah!");
-      return;
+  const generateRandomCode = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; 
+    let result = '';
+    for (let i = 0; i < 6; i++) {
+      result += chars.charAt(Math.floor(Math.random() * chars.length));
     }
+    return result;
+  };
 
+  const handleNextResetStep = () => {
+    if (resetStep === 1) {
+      if (resetPassword !== 'Adzeem1312') {
+        alert("Kata laluan master salah!");
+        return;
+      }
+      setVerificationCode(generateRandomCode());
+      setResetStep(2);
+    } else if (resetStep === 2) {
+      if (inputVerificationCode.toUpperCase() !== verificationCode) {
+        alert("Kod pengesahan tidak sepadan!");
+        return;
+      }
+      setResetStep(3);
+    }
+  };
+
+  const handleResetSystem = async () => {
     setIsResetting(true);
     try {
-      // 1. Delete all members
       const memberSnapshot = await getDocs(collection(db, 'members'));
       const batchSize = 100; 
       
@@ -169,7 +192,6 @@ export default function AdminPanel({ onLogout, settings, lang }: { onLogout: () 
         await batch.commit();
       }
 
-      // 2. Clear logs
       const logSnapshot = await getDocs(collection(db, 'logs'));
       for (let i = 0; i < logSnapshot.docs.length; i += batchSize) {
         const batch = writeBatch(db);
@@ -178,10 +200,8 @@ export default function AdminPanel({ onLogout, settings, lang }: { onLogout: () 
         await batch.commit();
       }
 
-      // 3. Reset counters
       await setDoc(doc(db, 'counters', 'members'), { count: 0 });
 
-      // 4. Log the reset
       await logActivity({
         category: 'system',
         action: 'System Full Reset',
@@ -189,14 +209,21 @@ export default function AdminPanel({ onLogout, settings, lang }: { onLogout: () 
       });
 
       alert("Penyifaran semula berjaya!");
-      setShowResetModal(false);
-      setResetPassword('');
+      handleCloseResetModal();
     } catch (err) {
       console.error(err);
       alert("Gagal melakukan penyifaran semula sistem. Sila cuba lagi.");
     } finally {
       setIsResetting(false);
     }
+  };
+
+  const handleCloseResetModal = () => {
+    setShowResetModal(false);
+    setResetStep(1);
+    setResetPassword('');
+    setVerificationCode('');
+    setInputVerificationCode('');
   };
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -546,7 +573,7 @@ export default function AdminPanel({ onLogout, settings, lang }: { onLogout: () 
 
       <AnimatePresence>
         {showResetModal && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md" onClick={() => setShowResetModal(false)}>
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md" onClick={handleCloseResetModal}>
             <motion.div 
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
@@ -557,34 +584,88 @@ export default function AdminPanel({ onLogout, settings, lang }: { onLogout: () 
               <div className="w-16 h-16 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center mx-auto mb-6">
                 <AlertTriangle className="w-8 h-8" />
               </div>
-              <h3 className="text-xl font-black text-slate-800 mb-2">Pengesahan Reset Sistem</h3>
-              <p className="text-xs text-slate-500 font-medium mb-8">Tindakan ini akan memadam SEMUA rekod secara kekal. <br/>Sila masukkan kata laluan <b>Adzeem1312</b>.</p>
+              
+              <div className="mb-8">
+                <div className="flex justify-center gap-2 mb-4">
+                  {[1, 2, 3].map((s) => (
+                    <div 
+                      key={s} 
+                      className={`h-1.5 w-8 rounded-full transition-all duration-500 ${resetStep >= s ? 'bg-red-500' : 'bg-slate-100'}`} 
+                    />
+                  ))}
+                </div>
+                <h3 className="text-xl font-black text-slate-800 mb-2">
+                  {resetStep === 1 ? "Langkah 1: Kata Laluan Master" : 
+                   resetStep === 2 ? "Langkah 2: Kod Rawak" : 
+                   "Langkah 3: Pengesahan Akhir"}
+                </h3>
+                <p className="text-xs text-slate-500 font-medium whitespace-pre-line">
+                  {resetStep === 1 ? "Sila masukkan kata laluan keselamatan untuk memulakan proses penyifaran semula." : 
+                   resetStep === 2 ? "Taip semula kod di bawah untuk membuktikan anda dalam keadaan sedar." : 
+                   "AMARAN: Ini adalah langkah terakhir. Semua data akan dipadamkan selama-lamanya."}
+                </p>
+              </div>
               
               <div className="space-y-4">
-                <input 
-                  type="password"
-                  value={resetPassword || ''}
-                  onChange={(e) => setResetPassword(e.target.value)}
-                  placeholder="Masukkan kata laluan..."
-                  className="w-full bg-slate-50 border border-slate-100 rounded-xl px-5 py-4 outline-none focus:ring-2 focus:ring-red-500 font-bold text-center"
-                />
+                {resetStep === 1 && (
+                  <input 
+                    type="password"
+                    autoFocus
+                    value={resetPassword || ''}
+                    onChange={(e) => setResetPassword(e.target.value)}
+                    placeholder="Masukkan kata laluan master..."
+                    className="w-full bg-slate-50 border border-slate-100 rounded-xl px-5 py-4 outline-none focus:ring-2 focus:ring-red-500 font-bold text-center"
+                  />
+                )}
+
+                {resetStep === 2 && (
+                  <div className="space-y-4">
+                    <div className="bg-slate-900 text-white py-4 rounded-2xl font-mono text-2xl tracking-[0.5em] font-black select-none border-b-4 border-slate-700 shadow-inner">
+                      {verificationCode}
+                    </div>
+                    <input 
+                      type="text"
+                      autoFocus
+                      value={inputVerificationCode || ''}
+                      onChange={(e) => setInputVerificationCode(e.target.value.toUpperCase())}
+                      placeholder="Taip kod rawak di atas..."
+                      className="w-full bg-slate-50 border border-slate-100 rounded-xl px-5 py-4 outline-none focus:ring-2 focus:ring-red-500 font-bold text-center uppercase"
+                    />
+                  </div>
+                )}
+
+                {resetStep === 3 && (
+                  <div className="p-6 bg-red-50 rounded-2xl border-2 border-dashed border-red-200">
+                    <p className="text-red-600 font-black text-lg animate-pulse mb-1">DATA AKAN DIPADAM</p>
+                    <p className="text-[10px] text-red-400 font-black uppercase tracking-widest leading-relaxed">
+                      Ahli • Bayaran • Log • ID Ahli
+                    </p>
+                  </div>
+                )}
+
                 <div className="flex gap-3 pt-4">
                   <button 
-                    onClick={() => {
-                      setShowResetModal(false);
-                      setResetPassword('');
-                    }}
+                    onClick={handleCloseResetModal}
                     className="flex-1 px-4 py-4 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl text-xs uppercase tracking-widest transition-all"
                   >
                     Batal
                   </button>
-                  <button 
-                    disabled={isResetting || !resetPassword}
-                    onClick={handleResetSystem}
-                    className="flex-1 px-4 py-4 bg-red-600 hover:bg-red-700 text-white font-black rounded-xl text-xs uppercase tracking-widest transition-all shadow-lg shadow-red-200 disabled:opacity-50"
-                  >
-                    {isResetting ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : "Sahkan Reset"}
-                  </button>
+                  {resetStep < 3 ? (
+                    <button 
+                      onClick={handleNextResetStep}
+                      className="flex-1 px-4 py-4 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-xl text-xs uppercase tracking-widest transition-all shadow-lg"
+                    >
+                      Seterusnya
+                    </button>
+                  ) : (
+                    <button 
+                      disabled={isResetting}
+                      onClick={handleResetSystem}
+                      className="flex-1 px-4 py-4 bg-red-600 hover:bg-red-700 text-white font-black rounded-xl text-xs uppercase tracking-widest transition-all shadow-lg shadow-red-200 disabled:opacity-50"
+                    >
+                      {isResetting ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : "LEDAKKAN DATA"}
+                    </button>
+                  )}
                 </div>
               </div>
             </motion.div>

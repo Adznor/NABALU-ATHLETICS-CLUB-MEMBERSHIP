@@ -1,13 +1,7 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // 0. Default Deny
-    match /{document=**} {
-      allow read, write: if false;
-    }
-
-    // --- PHASE 3: Primitives ---
-    
+    // Standard Primitives
     function isSignedIn() {
       return request.auth != null;
     }
@@ -17,7 +11,12 @@ service cloud.firestore {
              request.auth.token.email == "g-73273737@moe-dl.edu.my";
     }
 
-    // Global allow for Super Admin
+    // Global Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Admin Override (Highest priority)
     match /{document=**} {
       allow read, write: if isAdmin();
     }
@@ -82,12 +81,14 @@ service cloud.firestore {
     }
 
     match /members/{memberId} {
-      // Registration: Anyone can create a "pending" member if it passes validation
+      // Registration: Anyone can create a "pending" member
       allow create: if 
-        isValidId(memberId) && (
+        (
           isAdmin() || (
-            isValidMember(incoming()) &&
-            incoming().status == 'pending'
+            incoming().status == 'pending' &&
+            incoming().fullName is string &&
+            incoming().icNumber is string &&
+            incoming().membershipType in ['Ahli Individu', 'Ahli Remaja', 'Ahli Kehormat']
           )
         );
 
