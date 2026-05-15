@@ -62,31 +62,33 @@ export default function ClubInfo({ settings, lang, setLang }: { settings: any, l
   // Stats Logic
   const registered = members.filter(m => m.status === 'verified');
   const totalAppsCount = members.length;
-  const verifiedCount = registered.length;
+  const verifiedCount = registered.filter(m => m.membershipType !== 'Ahli Kehormat').length;
 
   const individu = registered.filter(m => m.membershipType === 'Ahli Individu');
   const remaja = registered.filter(m => m.membershipType === 'Ahli Remaja');
   const kehormat = registered.filter(m => m.membershipType === 'Ahli Kehormat');
 
+  const totalOverall = registered.length;
+
   const individuStats = {
     count: individu.length,
     male: individu.filter(m => m.gender === 'Lelaki').length,
     female: individu.filter(m => m.gender === 'Perempuan').length,
-    percentage: verifiedCount > 0 ? (individu.length / verifiedCount * 100).toFixed(1) : '0'
+    percentage: totalOverall > 0 ? (individu.length / totalOverall * 100).toFixed(1) : '0'
   };
 
   const remajaStats = {
     count: remaja.length,
     male: remaja.filter(m => m.gender === 'Lelaki').length,
     female: remaja.filter(m => m.gender === 'Perempuan').length,
-    percentage: verifiedCount > 0 ? (remaja.length / verifiedCount * 100).toFixed(1) : '0'
+    percentage: totalOverall > 0 ? (remaja.length / totalOverall * 100).toFixed(1) : '0'
   };
 
   const kehormatStats = {
     count: kehormat.length,
     male: kehormat.filter(m => m.gender === 'Lelaki').length,
     female: kehormat.filter(m => m.gender === 'Perempuan').length,
-    percentage: verifiedCount > 0 ? (kehormat.length / verifiedCount * 100).toFixed(1) : '0'
+    percentage: totalOverall > 0 ? (kehormat.length / totalOverall * 100).toFixed(1) : '0'
   };
 
   const getPercent = (count: number, total: number) => {
@@ -98,7 +100,7 @@ export default function ClubInfo({ settings, lang, setLang }: { settings: any, l
     <div className="relative max-w-4xl mx-auto px-4 py-12 md:py-20 space-y-24 overflow-hidden">
       {/* Background Watermark Logo */}
       {settings?.logoBase64 && (
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[150%] h-[150%] opacity-[0.03] pointer-events-none -z-10 rotate-12">
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[150%] h-[150%] opacity-[0.05] pointer-events-none -z-10 rotate-12">
           <img src={settings.logoBase64} alt="" className="w-full h-full object-contain" />
         </div>
       )}

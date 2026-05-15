@@ -17,8 +17,8 @@ export default function Navigation({ activeTab, setActiveTab, isAdminMode, setIs
   ].filter(tab => tab.id !== 'register' || registrationOpen !== false);
 
   return (
-    <nav className="fixed bottom-0 sm:bottom-8 left-0 sm:left-1/2 sm:-translate-x-1/2 z-50 px-0 sm:px-4 w-full sm:max-w-md">
-      <div className="bg-slate-900/80 sm:bg-slate-900/90 shadow-2xl shadow-slate-900/40 rounded-t-[2rem] sm:rounded-[2.5rem] p-3 sm:p-2 flex items-center justify-between border-t sm:border border-white/10 backdrop-blur-2xl transition-all">
+    <nav className="fixed bottom-8 left-4 right-4 md:left-1/2 md:-translate-x-1/2 md:right-auto z-[999] w-auto max-w-md mx-auto">
+      <div className="bg-slate-900/80 backdrop-blur-3xl shadow-[0_32px_64px_-16px_rgba(0,0,0,0.5)] rounded-[2.5rem] p-2 flex items-center justify-between border border-white/10 transition-all duration-500">
         <div className="flex gap-1 flex-1">
           {tabs.map((tab) => (
             <button
