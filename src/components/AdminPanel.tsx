@@ -10,7 +10,7 @@ import { format } from 'date-fns';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-export default function AdminPanel({ onLogout, settings, lang }: { onLogout: () => void, settings: ClubSettings, lang: 'bm' | 'en' }) {
+export default function AdminPanel({ onLogout, settings, lang, isAdminViaPassword }: { onLogout: () => void, settings: ClubSettings, lang: 'bm' | 'en', isAdminViaPassword?: boolean }) {
   const [activeTab, setActiveTab] = useState<'members' | 'settings' | 'logs' | 'users'>('members');
   const [searchTerm, setSearchTerm] = useState('');
   const [localSettings, setLocalSettings] = useState<ClubSettings>(settings);
@@ -696,7 +696,7 @@ export default function AdminPanel({ onLogout, settings, lang }: { onLogout: () 
                   </div>
                 </div>
 
-                {auth.currentUser?.email === SUPER_ADMIN_EMAIL && (
+                {auth.currentUser?.email === SUPER_ADMIN_EMAIL && !isAdminViaPassword && (
                   <div className="md:col-span-2 border-t border-red-50 pt-8 mt-4">
                     <div className="p-6 bg-red-50 rounded-[2rem] border border-red-100 flex flex-col md:flex-row items-center justify-between gap-6">
                       <div className="flex items-center gap-4">
