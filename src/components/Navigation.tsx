@@ -1,19 +1,18 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import { Shield, Users, Info, UserPlus, Lock } from 'lucide-react';
+import { Shield, Users, Info, UserPlus, Lock, Sun, Moon } from 'lucide-react';
 
-export default function Navigation({ activeTab, setActiveTab, isAdminMode, setIsAdminMode, lang, registrationOpen }: { 
+export default function Navigation({ activeTab, setActiveTab, isAdminMode, setIsAdminMode, registrationOpen }: { 
   activeTab: string, 
   setActiveTab: (t: string) => void,
   isAdminMode: boolean,
   setIsAdminMode: (b: boolean) => void,
-  lang: 'bm' | 'en',
   registrationOpen?: boolean
 }) {
   const tabs = [
-    { id: 'info', label: lang === 'bm' ? 'Info Kelab' : 'Club Info', icon: <Info className="w-4 h-4" /> },
-    { id: 'register', label: lang === 'bm' ? 'Daftar' : 'Register', icon: <UserPlus className="w-4 h-4" /> },
-    { id: 'list', label: lang === 'bm' ? 'Senarai Ahli' : 'Members', icon: <Users className="w-4 h-4" /> },
+    { id: 'info', label: 'Info Kelab', icon: <Info className="w-4 h-4" /> },
+    { id: 'register', label: 'Daftar', icon: <UserPlus className="w-4 h-4" /> },
+    { id: 'list', label: 'Senarai Ahli', icon: <Users className="w-4 h-4" /> },
   ].filter(tab => tab.id !== 'register' || registrationOpen !== false);
 
   return (

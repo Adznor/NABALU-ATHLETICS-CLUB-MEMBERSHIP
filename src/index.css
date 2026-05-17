@@ -32,7 +32,7 @@
   }
   
   .input-bento {
-    @apply w-full border-b-2 border-slate-50 focus:border-turquoise py-3 text-sm outline-none bg-transparent transition-all placeholder:text-slate-300 font-medium;
+    @apply w-full border-b-2 border-slate-50 focus:border-turquoise py-3 text-sm outline-none bg-transparent transition-all placeholder:text-slate-300 font-medium text-slate-800;
   }
   
   .label-bento {

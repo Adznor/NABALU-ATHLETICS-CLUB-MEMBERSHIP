@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { db, handleFirestoreError, OperationType, logActivity } from '../lib/firebase';
-import { collection, query, orderBy, onSnapshot, doc, deleteDoc, updateDoc, runTransaction, serverTimestamp, where, limit } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, doc, deleteDoc, updateDoc, runTransaction, serverTimestamp, where, limit, getDocs } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
-import { Users, Search, Trash2, CheckCircle, Grid, List as ListIcon, X, FileText, ImageIcon, CreditCard, Calendar, Edit3, Save, User, Loader2, Download, AlertTriangle, MessageSquare, Clock, IdCard } from 'lucide-react';
+import { Users, Search, Trash2, CheckCircle, Grid, List as ListIcon, X, FileText, ImageIcon, CreditCard, Calendar, Edit3, Save, User, Loader2, Download, AlertTriangle, MessageSquare, Clock, IdCard, Share2, ShieldCheck, Mail } from 'lucide-react';
 import { format } from 'date-fns';
 import { Member, MembershipType, MembershipStatus, LogEntry } from '../types';
 import { jsPDF } from 'jspdf';
@@ -19,12 +19,14 @@ const CANCELLATION_REASONS = [
 
 export default function MemberList({ 
   isAdmin = false, 
-  lang,
+  theme,
+  settings,
   searchTerm: externalSearchTerm,
   onSearchTermChange
 }: { 
   isAdmin?: boolean, 
-  lang: 'bm' | 'en',
+  theme: 'light' | 'dark',
+  settings?: any,
   searchTerm?: string,
   onSearchTermChange?: (val: string) => void
 }) {
@@ -46,6 +48,27 @@ export default function MemberList({
   const [isUpdating, setIsUpdating] = useState(false);
   const [deletingMember, setDeletingMember] = useState<Member | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isEmailRegistered, setIsEmailRegistered] = useState<boolean | null>(null);
+
+  const checkEmailRegistration = async (email: string) => {
+    if (!isAdmin || !email) return;
+    try {
+      const q = query(collection(db, 'users'), where('email', '==', email), limit(1));
+      const snap = await getDocs(q);
+      setIsEmailRegistered(!snap.empty);
+    } catch (err) {
+      console.error("Check email failed:", err);
+      setIsEmailRegistered(null);
+    }
+  };
+
+  useEffect(() => {
+    if (selectedMemberForDetail?.email) {
+      checkEmailRegistration(selectedMemberForDetail.email);
+    } else {
+      setIsEmailRegistered(null);
+    }
+  }, [selectedMemberForDetail, isAdmin]);
 
   const t = {
     bm: {
@@ -158,14 +181,14 @@ export default function MemberList({
     doc.line(20, 58, 190, 58);
     
     const personalInfo = [
-      ['Nama Penuh', member.fullName],
-      ['No. Kad Pengenalan', member.icNumber],
-      ['Tarikh Lahir', member.dob],
-      ['Jantina', member.gender],
-      ['Jenis Keahlian', member.membershipType],
-      ['No. Telefon', member.phone],
+      ['Nama Penuh', (member.fullName || '').toUpperCase()],
+      ['No. Kad Pengenalan', (member.icNumber || '').toUpperCase()],
+      ['Tarikh Lahir', (member.dob || '').toUpperCase()],
+      ['Jantina', (member.gender || '').toUpperCase()],
+      ['Jenis Keahlian', (member.membershipType || '').toUpperCase()],
+      ['No. Telefon', (member.phone || '').toUpperCase()],
       ['Emel', member.email],
-      ['Alamat', member.address]
+      ['Alamat', (member.address || '').toUpperCase()]
     ];
     
     autoTable(doc, {
@@ -186,8 +209,8 @@ export default function MemberList({
       doc.line(20, finalY + 3, 190, finalY + 3);
       
       const guardianInfo = [
-        ['Nama Penjaga', member.guardianName || '-'],
-        ['No. Telefon Penjaga', member.guardianPhone || '-']
+        ['Nama Penjaga', (member.guardianName || '-').toUpperCase()],
+        ['No. Telefon Penjaga', (member.guardianPhone || '-').toUpperCase()]
       ];
       
       autoTable(doc, {
@@ -252,6 +275,15 @@ export default function MemberList({
     // Accent bar
     doc.setFillColor(45, 212, 191); // turquoise-400
     doc.rect(0, 0, 85.6, 8, 'F');
+
+    // Logo on card
+    if (settings?.logoBase64) {
+      try {
+        doc.addImage(settings.logoBase64, 'JPEG', 5, 1.5, 5, 5);
+      } catch (e) {
+        console.error("PDF logo error:", e);
+      }
+    }
 
     // Header text
     doc.setTextColor(15, 23, 42); // slate-900
@@ -343,6 +375,26 @@ export default function MemberList({
 
   const [memberLogs, setMemberLogs] = useState<LogEntry[]>([]);
 
+  const handleShare = async (member: Member) => {
+    const text = `Profil Keahlian NAC: ${member.fullName} (${member.membershipId || 'PENDING'})`;
+    const url = window.location.href;
+    
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: 'Profil Keahlian NAC',
+          text: text,
+          url: url,
+        });
+      } catch (err) {
+        console.error("Popup share failed:", err);
+      }
+    } else {
+      navigator.clipboard.writeText(`${text} - ${url}`);
+      alert("Pautan telah disalin ke papan klip!");
+    }
+  };
+
   useEffect(() => {
     if (!selectedMemberForDetail?.id || !isAdmin) {
       setMemberLogs([]);
@@ -363,7 +415,7 @@ export default function MemberList({
     return () => unsubscribe();
   }, [selectedMemberForDetail?.id, isAdmin]);
 
-  const current = t[lang];
+  const current = (t as any).bm;
 
   useEffect(() => {
     const q = query(collection(db, 'members'), orderBy('createdAt', 'desc'));
@@ -426,20 +478,20 @@ export default function MemberList({
     ];
 
     const rows = filteredMembers.map(m => [
-      m.membershipId,
-      `"${m.fullName.replace(/"/g, '""')}"`,
-      m.icNumber,
-      m.membershipType,
-      m.gender,
-      m.dob,
-      `"${m.address.replace(/"/g, '""')}"`,
-      m.phone,
+      m.membershipId ? m.membershipId.toUpperCase() : '-',
+      `"${(m.fullName || '').toUpperCase().replace(/"/g, '""')}"`,
+      (m.icNumber || '').toUpperCase(),
+      (m.membershipType || '').toUpperCase(),
+      (m.gender || '').toUpperCase(),
+      (m.dob || '').toUpperCase(),
+      `"${(m.address || '').toUpperCase().replace(/"/g, '""')}"`,
+      (m.phone || '').toUpperCase(),
       m.email,
-      m.guardianName ? `"${m.guardianName.replace(/"/g, '""')}"` : '-',
+      m.guardianName ? `"${m.guardianName.toUpperCase().replace(/"/g, '""')}"` : '-',
       m.guardianPhone || '-',
-      m.status === 'verified' ? 'Disahkan' : 'Menunggu',
-      m.registrationFeePaid ? 'Sudah Dibayar' : 'Belum Dibayar',
-      m.annualPayments?.some(p => p.year === new Date().getFullYear() && p.paid) ? 'Sudah Dibayar' : 'Belum Dibayar',
+      (m.status === 'verified' ? 'Disahkan' : 'Menunggu').toUpperCase(),
+      (m.registrationFeePaid ? 'Sudah Dibayar' : 'Belum Dibayar').toUpperCase(),
+      (m.annualPayments?.some(p => p.year === new Date().getFullYear() && p.paid) ? 'Sudah Dibayar' : 'Belum Dibayar').toUpperCase(),
       m.createdAt ? format(m.createdAt.toDate(), 'dd/MM/yyyy') : '-'
     ]);
 
@@ -609,14 +661,14 @@ export default function MemberList({
     <div className="max-w-7xl mx-auto px-4 py-12">
       <div className="flex flex-col lg:flex-row gap-4 mb-6">
         {externalSearchTerm === undefined && (
-          <div className="relative flex-grow">
+          <div className={`relative flex-grow`}>
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
             <input
               type="text"
               placeholder={current.searchPlaceholder}
               value={searchTerm || ''}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-12 pr-4 py-4 bg-white border border-teal-50 rounded-2xl shadow-sm focus:ring-2 focus:ring-turquoise text-sm outline-none transition-all"
+              className={`w-full pl-12 pr-4 py-4 rounded-2xl shadow-sm focus:ring-2 focus:ring-turquoise text-sm outline-none transition-all ${theme === 'dark' ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-teal-50 text-slate-700'}`}
             />
           </div>
         )}
@@ -625,7 +677,7 @@ export default function MemberList({
           <select 
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value)}
-            className="bg-white border border-teal-50 rounded-2xl shadow-sm px-4 py-4 text-[10px] font-black uppercase tracking-[0.1em] outline-none cursor-pointer hover:bg-slate-50 transition-colors"
+            className="bg-white border border-teal-50 rounded-2xl shadow-sm px-4 py-4 text-[10px] font-black uppercase tracking-[0.1em] outline-none cursor-pointer hover:bg-slate-50 transition-colors text-slate-800"
           >
             <option value="all">{current.allStatus}</option>
             <option value="pending">{current.pending}</option>
@@ -636,18 +688,18 @@ export default function MemberList({
           <select 
             value={filterMembershipType}
             onChange={(e) => setFilterMembershipType(e.target.value)}
-            className="bg-white border border-teal-50 rounded-2xl shadow-sm px-4 py-4 text-[10px] font-black uppercase tracking-[0.1em] outline-none cursor-pointer hover:bg-slate-50 transition-colors"
+            className="bg-white border border-teal-50 rounded-2xl shadow-sm px-4 py-4 text-[10px] font-black uppercase tracking-[0.1em] outline-none cursor-pointer hover:bg-slate-50 transition-colors text-slate-800"
           >
             <option value="all">{current.allTypes}</option>
-            <option value="Ahli Individu">{lang === 'bm' ? 'Ahli Individu' : 'Individual Member'}</option>
-            <option value="Ahli Remaja">{lang === 'bm' ? 'Ahli Remaja' : 'Youth Member'}</option>
-            <option value="Ahli Kehormat">{lang === 'bm' ? 'Ahli Kehormat' : 'Honorary Member'}</option>
+            <option value="Ahli Individu">Ahli Individu</option>
+            <option value="Ahli Remaja">Ahli Remaja</option>
+            <option value="Ahli Kehormat">Ahli Kehormat</option>
           </select>
 
           <select 
             value={filterGender}
             onChange={(e) => setFilterGender(e.target.value)}
-            className="bg-white border border-teal-50 rounded-2xl shadow-sm px-4 py-4 text-[10px] font-black uppercase tracking-[0.1em] outline-none cursor-pointer hover:bg-slate-50 transition-colors"
+            className="bg-white border border-teal-50 rounded-2xl shadow-sm px-4 py-4 text-[10px] font-black uppercase tracking-[0.1em] outline-none cursor-pointer hover:bg-slate-50 transition-colors text-slate-800"
           >
             <option value="all">{current.allGender}</option>
             <option value="Lelaki">{current.male}</option>
@@ -657,7 +709,7 @@ export default function MemberList({
           <select 
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value)}
-            className="bg-white border border-teal-50 rounded-2xl shadow-sm px-4 py-4 text-[10px] font-black uppercase tracking-[0.1em] outline-none cursor-pointer hover:bg-slate-50 transition-colors"
+            className="bg-white border border-teal-50 rounded-2xl shadow-sm px-4 py-4 text-[10px] font-black uppercase tracking-[0.1em] outline-none cursor-pointer hover:bg-slate-50 transition-colors text-slate-800"
           >
             <option value="newest">{current.newest}</option>
             <option value="oldest">{current.oldest}</option>
@@ -692,8 +744,8 @@ export default function MemberList({
       </div>
 
       {viewMode === 'list' ? (
-        <div className="bento-card !p-0 overflow-hidden overflow-x-auto custom-scrollbar">
-          <table className="w-full text-left min-w-[800px]">
+        <div className="bento-card !p-0 overflow-hidden overflow-x-auto custom-scrollbar bg-white">
+          <table className="w-full text-left min-w-[800px] text-slate-800">
             <thead>
               <tr className="bg-slate-50/50 border-b border-teal-50">
                 <th className="px-6 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">{current.headerMember}</th>
@@ -720,21 +772,21 @@ export default function MemberList({
                           <img src={member.photoBase64} className="w-full h-full object-cover" />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center font-bold text-turquoise text-xs">
-                            {member.fullName.substring(0, 2).toUpperCase()}
+                            {(member.fullName || '').substring(0, 2).toUpperCase()}
                           </div>
                         )}
                       </div>
                       <div>
-                        <p className="font-bold text-slate-800 text-sm">{member.fullName}</p>
+                        <p className="font-bold text-slate-800 text-sm">{(member.fullName || '').toUpperCase()}</p>
                         <div className="flex items-center gap-2">
-                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{member.membershipType}</p>
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{(member.membershipType || '').toUpperCase()}</p>
                         </div>
                       </div>
                     </div>
                   </td>
                   <td className="px-6 py-4 text-center">
                     {member.membershipId ? (
-                      <span className="text-[10px] font-black font-mono bg-turquoise text-white px-2 py-1 rounded inline-block shadow-sm shadow-turquoise/20">{member.membershipId}</span>
+                      <span className="text-[10px] font-black font-mono bg-turquoise text-white px-2 py-1 rounded inline-block shadow-sm shadow-turquoise/20">{member.membershipId.toUpperCase()}</span>
                     ) : (
                       <span className="text-[8px] font-black italic text-slate-300 uppercase tracking-widest">N/A</span>
                     )}
@@ -839,7 +891,7 @@ export default function MemberList({
               layout
               key={member.id}
               onClick={() => !isAdmin && setSelectedMemberForDetail(member)}
-              className={`bento-card !p-4 sm:!p-6 group flex flex-col items-center text-center transition-all cursor-pointer border-white/50 backdrop-blur-md shadow-lg hover:shadow-xl ${
+              className={`bento-card !p-4 sm:!p-6 group flex flex-col items-center text-center transition-all cursor-pointer border-white/50 backdrop-blur-md shadow-lg hover:shadow-xl text-slate-800 ${
                 member.membershipType === 'Ahli Remaja' 
                 ? 'bg-gradient-to-br from-white via-white to-green-100/50' 
                 : member.membershipType === 'Ahli Kehormat'
@@ -854,12 +906,12 @@ export default function MemberList({
                   <img src={member.photoBase64} className="w-full h-full object-cover" />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center font-bold text-turquoise text-xl">
-                    {member.fullName.substring(0, 2).toUpperCase()}
+                    {(member.fullName || '').substring(0, 2).toUpperCase()}
                   </div>
                 )}
               </div>
-              <h4 className="font-black text-slate-800 text-sm mb-1 leading-tight line-clamp-1">{member.fullName}</h4>
-              <p className="text-[10px] font-black font-mono text-turquoise mb-4 uppercase tracking-wider">{member.membershipId || 'Permohonan'}</p>
+              <h4 className="font-black text-slate-800 text-sm mb-1 leading-tight line-clamp-1">{(member.fullName || '').toUpperCase()}</h4>
+              <p className="text-[10px] font-black font-mono text-turquoise mb-4 uppercase tracking-wider">{(member.membershipId || 'Permohonan').toUpperCase()}</p>
               
                 <div className="flex gap-2">
                   <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest ${
@@ -876,7 +928,7 @@ export default function MemberList({
                   <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest border border-slate-100 shadow-sm ${
                     member.membershipType === 'Ahli Kehormat' ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-white/50 text-slate-400'
                   }`}>
-                    {member.membershipType}
+                    {(member.membershipType || '').toUpperCase()}
                   </span>
                 </div>
               
@@ -948,7 +1000,7 @@ export default function MemberList({
       )}
 
       {filteredMembers.length === 0 && (
-        <div className="text-center py-24 bg-white/50 rounded-[2rem] border border-dashed border-teal-100 mt-4">
+        <div className="text-center py-24 bg-white/50 rounded-[2rem] border border-dashed border-teal-100 mt-4 text-slate-800">
           <Users className="w-12 h-12 text-teal-100 mx-auto mb-4" />
           <p className="text-slate-400 font-black text-[10px] uppercase tracking-widest">{current.noMembers}</p>
         </div>
@@ -1024,13 +1076,48 @@ export default function MemberList({
               </div>
 
               <form onSubmit={handleUpdateMember} className="p-8">
+                <div className="flex flex-col items-center mb-8">
+                  <div className="relative group">
+                    <div className="w-24 h-24 rounded-[2rem] overflow-hidden bg-slate-100 border-4 border-slate-50 shadow-inner flex items-center justify-center">
+                      {editingMember.photoBase64 ? (
+                        <img src={editingMember.photoBase64} className="w-full h-full object-cover" />
+                      ) : (
+                        <ImageIcon className="w-8 h-8 text-slate-300" />
+                      )}
+                    </div>
+                    <label className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer rounded-[2rem]">
+                      <span className="text-[8px] font-black text-white uppercase tracking-widest text-center px-2">Klik untuk Tukar Gambar</span>
+                      <input 
+                        type="file" 
+                        accept="image/*" 
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                             if (file.size > 200 * 1024) {
+                               alert("Gambar terlalu besar (maks 200KB).");
+                               return;
+                             }
+                             const reader = new FileReader();
+                             reader.onloadend = () => {
+                               setEditingMember({...editingMember, photoBase64: reader.result as string});
+                             };
+                             reader.readAsDataURL(file);
+                          }
+                        }}
+                        className="hidden" 
+                      />
+                    </label>
+                  </div>
+                  <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mt-2">Gambar Profil Ahli</p>
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
                   <div className="md:col-span-2">
                     <label className="label-bento">Nama Penuh</label>
                     <input 
                       type="text" 
                       value={editingMember.fullName || ''}
-                      onChange={(e) => setEditingMember({...editingMember, fullName: e.target.value})}
+                      onChange={(e) => setEditingMember({...editingMember, fullName: e.target.value.toUpperCase()})}
                       className="input-bento font-bold"
                       required
                     />
@@ -1040,7 +1127,7 @@ export default function MemberList({
                     <input 
                       type="text" 
                       value={editingMember.icNumber || ''}
-                      onChange={(e) => setEditingMember({...editingMember, icNumber: e.target.value})}
+                      onChange={(e) => setEditingMember({...editingMember, icNumber: e.target.value.toUpperCase()})}
                       className="input-bento"
                       required
                     />
@@ -1197,7 +1284,7 @@ export default function MemberList({
                     <label className="label-bento">Alamat Tetap</label>
                     <textarea 
                       value={editingMember.address || ''}
-                      onChange={(e) => setEditingMember({...editingMember, address: e.target.value})}
+                      onChange={(e) => setEditingMember({...editingMember, address: e.target.value.toUpperCase()})}
                       className="input-bento min-h-[80px]"
                     />
                   </div>
@@ -1212,7 +1299,7 @@ export default function MemberList({
                         <input 
                           type="text" 
                           value={editingMember.guardianName || ''}
-                          onChange={(e) => setEditingMember({...editingMember, guardianName: e.target.value})}
+                          onChange={(e) => setEditingMember({...editingMember, guardianName: e.target.value.toUpperCase()})}
                           className="input-bento"
                         />
                       </div>
@@ -1221,7 +1308,7 @@ export default function MemberList({
                         <input 
                           type="text" 
                           value={editingMember.guardianIc || ''}
-                          onChange={(e) => setEditingMember({...editingMember, guardianIc: e.target.value})}
+                          onChange={(e) => setEditingMember({...editingMember, guardianIc: e.target.value.toUpperCase()})}
                           className="input-bento"
                         />
                       </div>
@@ -1261,195 +1348,140 @@ export default function MemberList({
         )}
       </AnimatePresence>
 
-      {/* Member Detail Popup (Public) */}
+      {/* Member Detail Card Redesign (Public & Admin) */}
       <AnimatePresence>
         {selectedMemberForDetail && (
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md"
+            className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md"
             onClick={() => setSelectedMemberForDetail(null)}
           >
             <motion.div 
-              initial={{ scale: 0.9, y: 50 }}
-              animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.9, y: 50 }}
-              className={`w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-[2.5rem] overflow-hidden shadow-2xl relative border border-white/50 custom-scrollbar ${
-                selectedMemberForDetail.membershipType === 'Ahli Remaja' 
-                ? 'bg-gradient-to-br from-white via-white to-green-50' 
-                : 'bg-gradient-to-br from-white via-white to-slate-100'
-              }`}
+              initial={{ scale: 0.9, y: 50, rotateX: 20 }}
+              animate={{ scale: 1, y: 0, rotateX: 0 }}
+              exit={{ scale: 0.9, y: 50, rotateX: 20 }}
+              className={`w-full max-w-sm rounded-[3rem] overflow-hidden shadow-[0_50px_100px_-20px_rgba(0,0,0,0.5)] relative border-4 border-white/20 bg-slate-900 group`}
               onClick={e => e.stopPropagation()}
             >
-              {/* Header Close */}
-              <button 
-                onClick={() => setSelectedMemberForDetail(null)}
-                className="absolute top-6 right-6 z-20 w-10 h-10 rounded-full bg-white/80 backdrop-blur-md shadow-sm flex items-center justify-center text-slate-400 hover:text-turquoise transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              {/* Card Header/Banner */}
+              <div className="relative h-32 bg-gradient-to-br from-turquoise via-turquoise-dark to-slate-900">
+                <div className="absolute inset-0 bg-black/20" />
+                <div className="absolute top-6 left-6 flex items-center gap-2">
+                  {settings?.logoBase64 && (
+                    <img src={settings.logoBase64} alt="Logo" className="w-8 h-8 object-contain" />
+                  )}
+                  <p className="text-[10px] font-black text-white uppercase tracking-widest leading-tight">
+                    Nabalu Athletics Club
+                  </p>
+                </div>
+                <button 
+                  onClick={() => setSelectedMemberForDetail(null)}
+                  className="absolute top-6 right-6 z-20 w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md flex items-center justify-center text-white transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
 
-              <div className="p-8">
-                <div className="flex flex-col md:flex-row gap-8 items-center md:items-start">
-                  {/* Large Photo */}
-                  <div className="w-56 h-56 md:w-64 md:h-64 rounded-[2.5rem] overflow-hidden bg-slate-50 shadow-xl border-8 border-white flex-shrink-0">
+              {/* Photo Section */}
+              <div className="relative px-8 -mt-16 flex justify-center">
+                <div className="relative">
+                  <div className="w-32 h-32 rounded-[2.5rem] overflow-hidden bg-slate-800 border-8 border-slate-900 shadow-2xl relative z-10">
                     {selectedMemberForDetail.photoBase64 ? (
                       <img src={selectedMemberForDetail.photoBase64} className="w-full h-full object-cover" />
                     ) : (
-                      <div className="w-full h-full flex items-center justify-center font-black text-turquoise text-6xl">
-                        {selectedMemberForDetail.fullName.substring(0, 2).toUpperCase()}
+                      <div className="w-full h-full flex items-center justify-center font-black text-turquoise text-4xl">
+                        {(selectedMemberForDetail.fullName || '').substring(0, 2).toUpperCase()}
                       </div>
                     )}
                   </div>
+                  {/* Status Badge Over Photo */}
+                  <div className={`absolute -right-2 -bottom-2 z-20 w-8 h-8 rounded-2xl flex items-center justify-center shadow-lg border-2 border-slate-900 ${
+                    selectedMemberForDetail.status === 'verified' ? 'bg-teal-500 text-white' : 'bg-orange-500 text-white'
+                  }`}>
+                    {selectedMemberForDetail.status === 'verified' ? <ShieldCheck className="w-4 h-4" /> : <Clock className="w-4 h-4" />}
+                  </div>
+                </div>
+              </div>
 
-                  <div className="flex-grow text-center md:text-left pt-4">
-                    <span className="px-3 py-1 bg-white/80 border border-slate-100 rounded-full text-[10px] font-black text-slate-400 uppercase tracking-widest shadow-sm mb-4 inline-block">
-                      {selectedMemberForDetail.membershipType}
-                    </span>
-                    <h2 className="text-3xl font-black text-slate-800 tracking-tight mb-2 leading-none">
-                      {selectedMemberForDetail.fullName}
-                    </h2>
-                    
-                    <div className="bg-turquoise text-white inline-block px-8 py-5 rounded-[2rem] shadow-2xl shadow-turquoise/30 mt-4">
-                      <p className="text-[11px] font-black uppercase tracking-[0.2em] opacity-80 mb-2">{current.headerId}</p>
-                      <p className="text-4xl md:text-6xl font-black font-mono leading-none tracking-tighter">
-                        {selectedMemberForDetail.membershipId || 'PENDING'}
-                      </p>
-                    </div>
+              {/* Main Content */}
+              <div className="p-8 pt-6">
+                <div className="text-center mb-8">
+                  <h2 className="text-xl font-black text-white tracking-tight mb-1 uppercase">
+                    {(selectedMemberForDetail.fullName || '').toUpperCase()}
+                  </h2>
+                  <p className="text-[10px] font-bold text-turquoise uppercase tracking-[0.3em]">
+                    {(selectedMemberForDetail.membershipType || '').toUpperCase()}
+                  </p>
+                </div>
 
-                    <div className="mt-8 grid grid-cols-1 gap-4">
-                      {isAdmin && (
-                        <button 
-                          onClick={() => exportMembershipCard(selectedMemberForDetail)}
-                          className="w-full flex items-center justify-center gap-2 p-4 bg-teal-600 hover:bg-teal-700 text-white rounded-2xl shadow-lg shadow-teal-200 transition-all font-black text-[10px] uppercase tracking-widest"
-                        >
-                          <IdCard className="w-4 h-4" />
-                          Muat Turun Kad Keahlian
-                        </button>
-                      )}
+                {/* Membership ID Bento */}
+                <div className="bg-white/5 rounded-[2rem] p-6 mb-6 border border-white/5 text-center">
+                  <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2">Nombor Keahlian</p>
+                  <p className="text-3xl font-black font-mono text-white tracking-tighter">
+                    {(selectedMemberForDetail.membershipId || 'PENDING').toUpperCase()}
+                  </p>
+                </div>
 
-                      {isAdmin && (
-                        <button 
-                          onClick={() => exportToPDF(selectedMemberForDetail)}
-                          className="w-full flex items-center justify-center gap-2 p-4 bg-teal-50 hover:bg-teal-100 text-teal-700 rounded-2xl border border-teal-100 shadow-sm transition-all font-black text-[10px] uppercase tracking-widest"
-                        >
-                          <FileText className="w-4 h-4" />
-                          Cetakan PDF Borang Keahlian
-                        </button>
-                      )}
-                      
-                      {isAdmin && (
-                        <div className="p-4 bg-white/50 rounded-2xl border border-white/50">
-                          <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-3 italic">Status Pembayaran</p>
-                          <div className="flex flex-col gap-2">
-                            <div className="flex flex-col gap-1 text-[10px] font-black uppercase tracking-widest">
-                              <div className="flex items-center justify-between">
-                                <span className="text-slate-400">Yuran Pendaftaran</span>
-                                <span className={selectedMemberForDetail.registrationFeePaid ? 'text-teal-500' : 'text-slate-300'}>
-                                  {selectedMemberForDetail.registrationFeePaid ? 'TELAH DIBAYAR ✓' : 'BELUM BAYAR X'}
-                                </span>
-                              </div>
-                              {selectedMemberForDetail.registrationFeePaid && selectedMemberForDetail.registrationFeeVerifiedAt && (
-                                <p className="text-[8px] text-slate-400 text-right font-mono italic">
-                                  Tarikh: {format(selectedMemberForDetail.registrationFeeVerifiedAt.toDate(), 'dd/MM/yyyy')}
-                                </p>
-                              )}
-                            </div>
-                            
-                            <div className="flex flex-col gap-1 text-[10px] font-black uppercase tracking-widest">
-                              <div className="flex items-center justify-between">
-                                <span className="text-slate-400">Yuran Tahunan ({new Date().getFullYear()})</span>
-                                <span className={selectedMemberForDetail.annualPayments?.some(p => p.year === new Date().getFullYear() && p.paid) ? 'text-orange-500' : 'text-slate-300'}>
-                                  {selectedMemberForDetail.annualPayments?.some(p => p.year === new Date().getFullYear() && p.paid) ? 'TELAH DIBAYAR ✓' : 'BELUM BAYAR X'}
-                                </span>
-                              </div>
-                              {(() => {
-                                const currentPayment = selectedMemberForDetail.annualPayments?.find(p => p.year === new Date().getFullYear() && p.paid);
-                                if (currentPayment && currentPayment.verifiedAt) {
-                                  return (
-                                    <p className="text-[8px] text-slate-400 text-right font-mono italic">
-                                      Tarikh: {format(currentPayment.verifiedAt.toDate(), 'dd/MM/yyyy')}
-                                    </p>
-                                  );
-                                }
-                                return null;
-                              })()}
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                      <div className="p-4 bg-white/50 rounded-2xl border border-white/50 flex justify-between items-center text-center md:text-left">
-                        <div className="flex-1">
-                          <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-1">{current.headerStatus}</p>
-                           <p className={`text-xs font-black uppercase ${
-                             selectedMemberForDetail.status === 'verified' ? 'text-teal-500' : 
-                             selectedMemberForDetail.status === 'cancelled' ? 'text-red-500' :
-                             'text-orange-500'
-                           }`}>
-                             {selectedMemberForDetail.status === 'verified' ? current.verified : 
-                              selectedMemberForDetail.status === 'cancelled' ? current.cancelled : 
-                              current.pending}
-                           </p>
-                        </div>
-                        <div className="flex-1 text-center">
-                          <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-1">Jantina</p>
-                          <p className="text-xs font-black text-slate-700 uppercase">{lang === 'bm' ? selectedMemberForDetail.gender : (selectedMemberForDetail.gender === 'Lelaki' ? 'Male' : 'Female')}</p>
-                        </div>
-                      </div>
-                    </div>
+                {/* Details Grid */}
+                <div className="grid grid-cols-2 gap-4 mb-8">
+                  <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
+                    <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Jantina</p>
+                    <p className="text-xs font-bold text-slate-300 uppercase">{(selectedMemberForDetail.gender || '').toUpperCase()}</p>
+                  </div>
+                  <div className="bg-white/5 rounded-2xl p-4 border border-white/5 text-right">
+                    <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Berdaftar</p>
+                    <p className="text-xs font-bold text-slate-300 uppercase">
+                      {selectedMemberForDetail.createdAt ? format(selectedMemberForDetail.createdAt.toDate(), 'dd/MM/yy') : '-'}
+                    </p>
                   </div>
                 </div>
 
-                <div className="mt-12 pt-8 border-t border-slate-200/30 flex flex-wrap gap-x-12 gap-y-6 justify-center md:justify-start">
-                   <div>
-                    <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-1">{current.headerDate}</p>
-                    <p className="text-sm font-bold text-slate-600">
-                      {selectedMemberForDetail.createdAt ? format(selectedMemberForDetail.createdAt.toDate(), 'dd/MMMM/yyyy') : '-'}
-                    </p>
-                  </div>
-                  {selectedMemberForDetail.guardianName && (
-                    <div>
-                      <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-1">Penjaga</p>
-                      <p className="text-sm font-bold text-slate-600">
-                        {selectedMemberForDetail.guardianName}
-                      </p>
-                    </div>
-                  )}
-                  {selectedMemberForDetail.guardianPhone && (
-                    <div>
-                      <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-1">Telefon Penjaga</p>
-                      <p className="text-sm font-bold text-slate-600">{selectedMemberForDetail.guardianPhone}</p>
-                    </div>
-                  )}
-
-                  {isAdmin && memberLogs.length > 0 && (
-                    <div className="col-span-1 md:col-span-2 pt-6 border-t border-slate-50">
-                      <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-4 flex items-center gap-2">
-                        <Clock className="w-3 h-3 text-turquoise" /> Rekod Aktiviti Ahli
-                      </p>
-                      <div className="space-y-3">
-                        {memberLogs.map(log => (
-                          <div key={log.id} className="p-3 bg-slate-50 rounded-xl border border-slate-100 text-[10px]">
-                            <div className="flex justify-between items-start mb-1">
-                              <span className="font-black text-slate-800 uppercase">{log.action}</span>
-                              <span className="text-slate-400 font-mono">
-                                {log.timestamp ? format(log.timestamp.toDate(), 'dd/MM/yy HH:mm') : '-'}
-                              </span>
-                            </div>
-                            <p className="text-slate-500 italic mb-1">{log.details}</p>
-                            <p className="text-[8px] text-slate-400 uppercase tracking-widest font-black text-right">Admin: {log.adminEmail}</p>
-                          </div>
-                        ))}
+                {/* Admin Only Info */}
+                {isAdmin && (
+                  <div className="mb-8 space-y-4">
+                    <div className={`p-4 rounded-2xl border flex items-center justify-between transition-all ${
+                      isEmailRegistered 
+                      ? 'bg-teal-500/10 border-teal-500/30 text-teal-400' 
+                      : 'bg-red-500/10 border-red-500/30 text-red-400'
+                    }`}>
+                      <div className="flex items-center gap-3">
+                        <Mail className="w-4 h-4" />
+                        <div>
+                          <p className="text-[8px] font-black uppercase tracking-widest opacity-60">Status Pengguna</p>
+                          <p className="text-[10px] font-black uppercase">
+                            {isEmailRegistered === null ? 'Memeriksa...' : (isEmailRegistered ? 'Telah Daftar App' : 'Belum Daftar App')}
+                          </p>
+                        </div>
                       </div>
+                      {isEmailRegistered && <CheckCircle className="w-4 h-4" />}
                     </div>
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div className="flex gap-3">
+                  <button 
+                    onClick={() => handleShare(selectedMemberForDetail)}
+                    className="flex-1 px-6 py-4 bg-white/5 hover:bg-white/10 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 border border-white/5"
+                  >
+                    <Share2 className="w-4 h-4" /> Share
+                  </button>
+                  {isAdmin && (
+                    <button 
+                      onClick={() => exportMembershipCard(selectedMemberForDetail)}
+                      className="flex-1 px-6 py-4 bg-turquoise hover:bg-turquoise-dark text-white rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 shadow-lg shadow-turquoise/20"
+                    >
+                      <Download className="w-4 h-4" /> Kad PDF
+                    </button>
                   )}
                 </div>
               </div>
 
               {/* Graphic Element */}
-              <div className="absolute -left-12 -bottom-12 w-48 h-48 bg-turquoise/5 rounded-full blur-3xl pointer-events-none" />
-              <div className="absolute -right-12 -top-12 w-48 h-48 bg-teal-300/10 rounded-full blur-3xl pointer-events-none" />
+              <div className="absolute -bottom-20 -right-20 w-48 h-48 bg-turquoise/10 rounded-full blur-[60px] pointer-events-none" />
+              <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full blur-[40px] pointer-events-none" />
             </motion.div>
           </motion.div>
         )}

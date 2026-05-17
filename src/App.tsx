@@ -32,11 +32,26 @@ export default function App() {
   const [isAdminMode, setIsAdminMode] = useState(false);
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
   const [isAdminViaPassword, setIsAdminViaPassword] = useState(false);
+  const [adminRole, setAdminRole] = useState<'super' | 'sub' | null>(null);
   const [adminPasswordInput, setAdminPasswordInput] = useState('');
   const [showAdminPass, setShowAdminPass] = useState(false);
   const [settings, setSettings] = useState<ClubSettings>(DEFAULT_SETTINGS);
   const [loading, setLoading] = useState(true);
-  const [lang, setLang] = useState<'bm' | 'en'>('bm');
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    if (typeof window !== 'undefined') {
+      return (localStorage.getItem('theme') as 'light' | 'dark') || 'light';
+    }
+    return 'light';
+  });
+
+  useEffect(() => {
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+    localStorage.setItem('theme', theme);
+  }, [theme]);
 
   useEffect(() => {
     // Set local persistence for better mobile experience
@@ -60,12 +75,33 @@ export default function App() {
       setLoading(false);
     });
 
-    const unsubAuth = onAuthStateChanged(auth, (user) => {
-      if (user && user.email === SUPER_ADMIN_EMAIL) {
-        setIsAdminAuthenticated(true);
-        setIsAdminViaPassword(false);
+    const unsubAuth = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        // First check super admin email
+        if (user.email === SUPER_ADMIN_EMAIL) {
+          setIsAdminAuthenticated(true);
+          setIsAdminViaPassword(false);
+          setAdminRole('super');
+        } else {
+          // Check for sub-admin role in Firestore
+          try {
+            const userDoc = await getDoc(doc(db, 'users', user.uid));
+            if (userDoc.exists() && userDoc.data().role === 'sub_admin') {
+              setIsAdminAuthenticated(true);
+              setIsAdminViaPassword(false);
+              setAdminRole('sub');
+            } else if (!isAdminViaPassword) {
+              setIsAdminAuthenticated(false);
+              setAdminRole(null);
+            }
+          } catch (err) {
+            console.error("Error checking admin role:", err);
+            if (!isAdminViaPassword) setIsAdminAuthenticated(false);
+          }
+        }
       } else if (!isAdminViaPassword) {
         setIsAdminAuthenticated(false);
+        setAdminRole(null);
       }
     });
 
@@ -85,10 +121,19 @@ export default function App() {
       
       if (user.email === SUPER_ADMIN_EMAIL) {
         setIsAdminAuthenticated(true);
+        setAdminRole('super');
       } else {
-        alert(`Akses dinafikan. Email anda (${user.email}) bukan email admin berdaftar ${SUPER_ADMIN_EMAIL}.`);
-        await auth.signOut(); // Ensure we sign out the wrong account
-        setIsAdminAuthenticated(false);
+        // Check for sub-admin role in Firestore
+        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        if (userDoc.exists() && userDoc.data().role === 'sub_admin') {
+          setIsAdminAuthenticated(true);
+          setAdminRole('sub');
+        } else {
+          alert(`Akses dinafikan. Email anda (${user.email}) tidak mempunyai akses admin.`);
+          await auth.signOut(); // Ensure we sign out the wrong account
+          setIsAdminAuthenticated(false);
+          setAdminRole(null);
+        }
       }
     } catch (err: any) {
       console.error("Admin Login Error:", err);
@@ -105,6 +150,7 @@ export default function App() {
     if (adminPasswordInput === '880310125473') {
       setIsAdminViaPassword(true);
       setIsAdminAuthenticated(true);
+      setAdminRole('super');
       setAdminPasswordInput('');
     } else {
       alert("Kata laluan admin salah.");
@@ -116,28 +162,28 @@ export default function App() {
     setIsAdminViaPassword(false);
     setIsAdminAuthenticated(false);
     setIsAdminMode(false);
+    setAdminRole(null);
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
+      <div className={`min-h-screen ${theme === 'dark' ? 'bg-slate-950' : 'bg-gray-50'} flex flex-col items-center justify-center p-4 transition-colors duration-500`}>
         <div className="w-16 h-16 bg-turquoise rounded-2xl flex items-center justify-center shadow-2xl mb-8 animate-bounce">
             <Shield className="text-white w-8 h-8" />
         </div>
         <Loader2 className="w-8 h-8 animate-spin text-turquoise mb-4" />
-        <p className="text-gray-400 font-black text-xs uppercase tracking-[0.3em]">Memulakan Aplikasi...</p>
+        <p className={`${theme === 'dark' ? 'text-slate-500' : 'text-gray-400'} font-black text-xs uppercase tracking-[0.3em]`}>Memulakan Aplikasi...</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-900 font-sans selection:bg-turquoise/30">
+    <div className={`min-h-screen ${theme === 'dark' ? 'bg-slate-950 text-slate-100' : 'bg-gray-50 text-gray-900'} font-sans selection:bg-turquoise/30 transition-colors duration-500`}>
       <Navigation 
         activeTab={activeTab} 
         setActiveTab={setActiveTab} 
         isAdminMode={isAdminMode}
         setIsAdminMode={setIsAdminMode}
-        lang={lang}
         registrationOpen={settings.registrationOpen}
       />
 
@@ -151,35 +197,35 @@ export default function App() {
               exit={{ opacity: 0, y: -20 }}
             >
               {!isAdminAuthenticated ? (
-                <div className="max-w-md mx-auto mt-24 bento-card text-center">
-                  <div className="w-16 h-16 bg-slate-100 text-slate-400 rounded-2xl flex items-center justify-center mx-auto mb-8">
+                <div className={`max-w-md mx-auto mt-24 bento-card text-center ${theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white'}`}>
+                  <div className={`w-16 h-16 ${theme === 'dark' ? 'bg-slate-800 text-slate-500' : 'bg-slate-100 text-slate-400'} rounded-2xl flex items-center justify-center mx-auto mb-8`}>
                     <Lock className="w-8 h-8" />
                   </div>
-                  <h2 className="text-xl font-black mb-4 uppercase tracking-[0.2em] text-slate-800">Akses Admin</h2>
-                  <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-10">Gunakan akaun Google berdaftar untuk mengakses panel.</p>
+                  <h2 className={`text-xl font-black mb-4 uppercase tracking-[0.2em] ${theme === 'dark' ? 'text-slate-100' : 'text-slate-800'}`}>Akses Admin</h2>
+                  <p className={`${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'} text-[10px] font-black uppercase tracking-widest mb-10`}>Gunakan akaun Google berdaftar untuk mengakses panel.</p>
                   <div className="space-y-6">
                     <button 
                       onClick={handleAdminLogin}
-                      className="w-full bg-slate-900 hover:bg-slate-800 text-white font-black py-4 rounded-xl shadow-xl transition-all uppercase text-xs tracking-widest flex items-center justify-center gap-2 mb-4"
+                      className={`w-full ${theme === 'dark' ? 'bg-slate-100 text-slate-900 hover:bg-white' : 'bg-slate-900 text-white hover:bg-slate-800'} font-black py-4 rounded-xl shadow-xl transition-all uppercase text-xs tracking-widest flex items-center justify-center gap-2 mb-4`}
                     >
                       Log Masuk Google
                     </button>
 
                     <div className="relative flex items-center my-8">
-                      <div className="flex-grow border-t border-slate-200"></div>
-                      <span className="flex-shrink mx-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Atau Guna Password</span>
-                      <div className="flex-grow border-t border-slate-200"></div>
+                      <div className={`flex-grow border-t ${theme === 'dark' ? 'border-slate-800' : 'border-slate-200'}`}></div>
+                      <span className={`flex-shrink mx-4 text-[10px] font-black ${theme === 'dark' ? 'text-slate-600' : 'text-slate-400'} uppercase tracking-widest`}>Atau Guna Password</span>
+                      <div className={`flex-grow border-t ${theme === 'dark' ? 'border-slate-800' : 'border-slate-200'}`}></div>
                     </div>
 
                     <form onSubmit={handlePasswordLogin} className="space-y-4">
                       <div className="relative">
-                        <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                        <Lock className={`absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 ${theme === 'dark' ? 'text-slate-600' : 'text-slate-400'}`} />
                         <input 
                           type={showAdminPass ? "text" : "password"}
                           placeholder="Kata Laluan Admin"
                           value={adminPasswordInput}
                           onChange={(e) => setAdminPasswordInput(e.target.value)}
-                          className="w-full pl-12 pr-12 py-4 bg-slate-50 border border-slate-100 rounded-xl text-sm outline-none focus:ring-2 focus:ring-turquoise"
+                          className={`w-full pl-12 pr-12 py-4 ${theme === 'dark' ? 'bg-slate-800 border-slate-700 text-white focus:ring-turquoise/50' : 'bg-slate-50 border-slate-100 focus:ring-turquoise'} rounded-xl text-sm outline-none`}
                           required
                         />
                         <button 
@@ -201,7 +247,7 @@ export default function App() {
                     <button 
                       type="button"
                       onClick={() => setIsAdminMode(false)}
-                      className="text-slate-400 hover:text-slate-600 font-bold text-[10px] uppercase tracking-widest w-full text-center pt-4"
+                      className={`${theme === 'dark' ? 'text-slate-600 hover:text-slate-400' : 'text-slate-400 hover:text-slate-600'} font-bold text-[10px] uppercase tracking-widest w-full text-center pt-4`}
                     >
                       Batal
                     </button>
@@ -211,8 +257,9 @@ export default function App() {
                 <AdminPanel 
                   settings={settings!} 
                   onLogout={handleLogout} 
-                  lang={lang} 
+                  theme={theme}
                   isAdminViaPassword={isAdminViaPassword}
+                  adminRole={adminRole}
                 />
               )}
             </motion.div>
@@ -223,15 +270,20 @@ export default function App() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
             >
-              {activeTab === 'info' && <ClubInfo settings={settings} lang={lang} setLang={setLang} />}
-              {activeTab === 'register' && <RegistrationForm settings={settings} lang={lang} />}
-              {activeTab === 'list' && <MemberList lang={lang} />}
+              {activeTab === 'info' && (
+                <ClubInfo 
+                  settings={settings} 
+                  theme={theme}
+                  setTheme={setTheme}
+                  onRegisterClick={() => setActiveTab('register')}
+                />
+              )}
+              {activeTab === 'register' && <RegistrationForm settings={settings} theme={theme} />}
+              {activeTab === 'list' && <MemberList theme={theme} settings={settings} />}
             </motion.div>
           )}
         </AnimatePresence>
       </main>
-
-
     </div>
   );
 }

@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { db, handleFirestoreError, OperationType, logActivity, auth, googleProvider, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile } from '../lib/firebase';
-import { collection, addDoc, serverTimestamp, runTransaction, doc, getDoc, query, where, getDocs, setDoc } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, runTransaction, doc, getDoc, query, where, getDocs, setDoc, updateDoc } from 'firebase/firestore';
 import { signInWithPopup } from 'firebase/auth';
 import { motion, AnimatePresence } from 'motion/react';
 import { CheckCircle, Upload, Loader2, Info, LogIn, Mail, ArrowLeft, User, Lock, Eye, EyeOff } from 'lucide-react';
 import { Member, MembershipType } from '../types';
 
-export default function RegistrationForm({ settings, lang }: { settings: any, lang: 'bm' | 'en' }) {
+export default function RegistrationForm({ settings, theme }: { settings: any, theme: 'light' | 'dark' }) {
   const [currentUser, setCurrentUser] = useState(auth.currentUser);
   const [isEmailMode, setIsEmailMode] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
@@ -16,16 +16,39 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
   const [showPassword, setShowPassword] = useState(false);
   const [isAuthLoading, setIsAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [existingMemberId, setExistingMemberId] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged((user) => {
       setCurrentUser(user);
       if (user) {
         saveUserToFirestore(user);
+        checkExistingMembership(user.uid);
+      } else {
+        setExistingMemberId(null);
       }
     });
     return () => unsubscribe();
   }, []);
+
+  const checkExistingMembership = async (uid: string) => {
+    try {
+      const q = query(collection(db, 'members'), where('applicantUid', '==', uid));
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        const docSnap = snap.docs[0];
+        const data = docSnap.data() as Member;
+        setExistingMemberId(docSnap.id);
+        setFormData(data);
+        setMembershipType(data.membershipType);
+        if (data.photoBase64) setPreviews(prev => ({ ...prev, photo: data.photoBase64 }));
+        if (data.receiptBase64) setPreviews(prev => ({ ...prev, receipt: data.receiptBase64 }));
+        setAcceptedTerms(true);
+      }
+    } catch (err) {
+      console.error("Failed to check existing membership:", err);
+    }
+  };
 
   const saveUserToFirestore = async (user: any, password?: string) => {
     try {
@@ -73,108 +96,55 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
     annualPayments: [],
   });
 
-  const t = {
-    bm: {
-      title: "Borang Permohonan",
-      clubName: "Nabalu Athletics Club",
-      membershipType: "1. Jenis Keahlian",
-      personalDetails: "2. Butiran Peribadi",
-      fullName: "Nama Penuh (Seperti dalam Kad Pengenalan)",
-      icNumber: "No. KP",
-      dob: "Tarikh Lahir",
-      gender: "Jantina",
-      phone: "No. Telefon",
-      email: "Email",
-      address: "Alamat Tetap / Sekolah",
-      guardianTitle: "Maklumat Penjaga (Wajib untuk Ahli Remaja)",
-      guardianName: "Nama Penjaga",
-      guardianPhone: "No. Telefon Penjaga",
-      guardianIc: "No. Kad Pengenalan Penjaga",
-      documents: "3. Dokumen",
-      photoLabel: "Gambar Profil",
-      receiptLabel: "Resit Pembayaran",
-      photoHint: "(Optional)",
-      receiptHint: "(Optional)",
-      bankHint: "Sila pastikan pembayaran dilakukan ke:",
-      termsTitle: "Terma & Syarat",
-      termsLink: "Klik untuk baca Terma & Syarat Keahlian",
-      termsAgree: "Saya setuju dengan segala terma & syarat.",
-      submitBtn: "Hantar Permohonan",
-      successTitle: "Terima Kasih!",
-      successMsg: "Permohonan anda telah diterima. Pihak kelab akan melakukan pengesahan dalam masa terdekat.",
-      successIdLabel: "Nombor Keahlian Anda",
-      backHome: "Kembali ke Laman Utama",
-      loading: "Sila tunggu...",
-      termsError: "Sila baca dan setuju dengan terma dan syarat.",
-      submitError: "Gagal menghantar permohonan. Sila cuba lagi.",
-      delete: "Padam",
-      mandatory: "(Wajib)",
-      loginTitle: "Log Masuk Diperlukan",
-      loginDesc: "Sila log masuk menggunakan akaun Google untuk meneruskan pendaftaran.",
-      loginBtn: "Log Masuk dengan Google",
-      loginEmailBtn: "Klik Sini Jika Gagal Log Masuk Google",
-      registerTitle: "Daftar Akaun",
-      loginEmailTitle: "Log Masuk Email",
-      emailLabel: "Alamat Email",
-      passwordLabel: "Kata Laluan",
-      nameLabel: "Nama Penuh",
-      registerBtn: "Daftar Sekarang",
-      hasAccount: "Sudah ada akaun? Log masuk",
-      noAccount: "Tiada akaun? Daftar sekarang",
-      duplicateIC: "Nombor kad pengenalan ini telah didaftarkan dalam sistem.",
-    },
-    en: {
-      title: "Application Form",
-      clubName: "Nabalu Athletics Club",
-      membershipType: "1. Membership Type",
-      personalDetails: "2. Personal Details",
-      fullName: "Full Name (As in Identity Card)",
-      icNumber: "ID Number (KP)",
-      dob: "Date of Birth",
-      gender: "Gender",
-      phone: "Phone Number",
-      email: "Email",
-      address: "Permanent Address / School",
-      guardianTitle: "Guardian Information (Mandatory for Youth Members)",
-      guardianName: "Guardian Name",
-      guardianPhone: "Guardian Phone",
-      guardianIc: "Guardian IC Number",
-      documents: "3. Documents",
-      photoLabel: "Profile Picture",
-      receiptLabel: "Payment Receipt",
-      photoHint: "(Optional)",
-      receiptHint: "(Optional)",
-      bankHint: "Please ensure payment is made to:",
-      termsTitle: "Terms & Conditions",
-      termsLink: "Click to read Membership Terms & Conditions",
-      termsAgree: "I agree to all terms and conditions.",
-      submitBtn: "Submit Application",
-      successTitle: "Thank You!",
-      successMsg: "Your application has been received. The club will verify it soon.",
-      successIdLabel: "Your Membership Number",
-      backHome: "Back to Home",
-      loading: "Please wait...",
-      termsError: "Please read and agree to the terms and conditions.",
-      submitError: "Failed to submit application. Please try again.",
-      delete: "Delete",
-      mandatory: "(Mandatory)",
-      loginTitle: "Login Required",
-      loginDesc: "Please login with your Google account to proceed with registration.",
-      loginBtn: "Login with Google",
-      loginEmailBtn: "Click Here if Google Login Fails",
-      registerTitle: "Register Account",
-      loginEmailTitle: "Email Login",
-      emailLabel: "Email Address",
-      passwordLabel: "Password",
-      nameLabel: "Full Name",
-      registerBtn: "Register Now",
-      hasAccount: "Already have an account? Login",
-      noAccount: "No account? Register now",
-      duplicateIC: "This identity card number is already registered in the system.",
-    }
+  const current = {
+    title: "Borang Permohonan",
+    clubName: "Nabalu Athletics Club",
+    membershipType: "1. Jenis Keahlian",
+    personalDetails: "2. Butiran Peribadi",
+    fullName: "Nama Penuh (Seperti dalam Kad Pengenalan)",
+    icNumber: "No. KP",
+    dob: "Tarikh Lahir",
+    gender: "Jantina",
+    phone: "No. Telefon",
+    email: "Email",
+    address: "Alamat Tetap / Sekolah",
+    guardianTitle: "Maklumat Penjaga (Wajib untuk Ahli Remaja)",
+    guardianName: "Nama Penjaga",
+    guardianPhone: "No. Telefon Penjaga",
+    guardianIc: "No. Kad Pengenalan Penjaga",
+    documents: "3. Dokumen",
+    photoLabel: "Gambar Profil",
+    receiptLabel: "Resit Pembayaran",
+    photoHint: "(Optional)",
+    receiptHint: "(Optional)",
+    bankHint: "Sila pastikan pembayaran dilakukan ke:",
+    termsTitle: "Terma & Syarat",
+    termsLink: "Klik untuk baca Terma & Syarat Keahlian",
+    termsAgree: "Saya setuju dengan segala terma & syarat.",
+    submitBtn: "Hantar Permohonan",
+    successTitle: "Terima Kasih!",
+    successMsg: "Permohonan anda telah diterima. Pihak kelab akan melakukan pengesahan dalam masa terdekat.",
+    successIdLabel: "Nombor Keahlian Anda",
+    backHome: "Kembali ke Laman Utama",
+    loading: "Sila tunggu...",
+    termsError: "Sila baca dan setuju dengan terma dan syarat.",
+    submitError: "Gagal menghantar permohonan. Sila cuba lagi.",
+    delete: "Padam",
+    mandatory: "(Wajib)",
+    loginTitle: "Log Masuk Diperlukan",
+    loginDesc: "Sila log masuk menggunakan akaun Google untuk meneruskan pendaftaran.",
+    loginBtn: "Log Masuk dengan Google",
+    loginEmailBtn: "Klik Sini Jika Gagal Log Masuk Google",
+    registerTitle: "Daftar Akaun",
+    loginEmailTitle: "Log Masuk Email",
+    emailLabel: "Alamat Email",
+    passwordLabel: "Kata Laluan",
+    nameLabel: "Nama Penuh",
+    registerBtn: "Daftar Sekarang",
+    hasAccount: "Sudah ada akaun? Log masuk",
+    noAccount: "Tiada akaun? Daftar sekarang",
+    duplicateIC: "Nombor kad pengenalan ini telah didaftarkan dalam sistem.",
   };
-
-  const current = t[lang];
 
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -191,19 +161,40 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
       }
     } catch (err: any) {
       console.error("Auth failed:", err);
-      let msg = lang === 'bm' ? "Gagal log masuk/daftar. Sila cuba lagi." : "Auth failed. Please try again.";
-      if (err.code === 'auth/email-already-in-use') msg = lang === 'bm' ? "Email telah digunakan." : "Email already in use.";
-      if (err.code === 'auth/weak-password') msg = lang === 'bm' ? "Kata laluan terlalu lemah (min 6 aksara)." : "Password too weak.";
-      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') msg = lang === 'bm' ? "Email atau kata laluan salah." : "Invalid email or password.";
+      let msg = "Gagal log masuk/daftar. Sila cuba lagi.";
+      if (err.code === 'auth/email-already-in-use') msg = "Email telah digunakan.";
+      if (err.code === 'auth/weak-password') msg = "Kata laluan terlalu lemah (min 6 aksara).";
+      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') msg = "Email atau kata laluan salah.";
       setAuthError(msg);
     } finally {
       setIsAuthLoading(false);
     }
   };
 
+  const formatIC = (val: string) => {
+    const cleanIC = val.replace(/[^0-9]/g, '').substring(0, 12);
+    if (cleanIC.length <= 6) return cleanIC;
+    if (cleanIC.length <= 8) return `${cleanIC.substring(0, 6)}-${cleanIC.substring(6)}`;
+    return `${cleanIC.substring(0, 6)}-${cleanIC.substring(6, 8)}-${cleanIC.substring(8)}`;
+  };
+
+  const formatPhone = (val: string) => {
+    if (!val) return '+6';
+    let clean = val;
+    if (!clean.startsWith('+6')) {
+      if (clean.startsWith('6')) clean = '+' + clean;
+      else if (clean.startsWith('+')) clean = '+6' + clean.substring(1);
+      else clean = '+6' + clean;
+    }
+    const prefix = clean.substring(0, 2);
+    const rest = clean.substring(2).replace(/[^0-9]/g, '');
+    return prefix + rest;
+  };
+
   const handleICChange = (ic: string) => {
-    // Only proceed if it looks like a valid IC start (YYMMDD)
-    const cleanIC = ic.replace(/[^0-9]/g, '');
+    const cleanIC = ic.replace(/[^0-9]/g, '').substring(0, 12);
+    const formattedIC = formatIC(cleanIC);
+    
     let newDOB = formData.dob || '';
     let newGender = formData.gender || 'Lelaki';
 
@@ -230,7 +221,7 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
       newGender = lastDigit % 2 === 0 ? 'Perempuan' : 'Lelaki';
     }
 
-    setFormData({ ...formData, icNumber: ic, dob: newDOB, gender: newGender as any });
+    setFormData({ ...formData, icNumber: formattedIC, dob: newDOB, gender: newGender as any });
   };
   const [files, setFiles] = useState<{ photo?: File; receipt?: File }>({});
   const [previews, setPreviews] = useState<{ photo?: string; receipt?: string }>({});
@@ -277,37 +268,52 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
     setError(null);
 
     try {
-      // Check for duplicate IC
-      const q = query(collection(db, 'members'), where('icNumber', '==', formData.icNumber));
-      const querySnapshot = await getDocs(q);
-      
-      if (!querySnapshot.empty) {
-        setError(current.duplicateIC);
-        setIsSubmitting(false);
-        return;
+      if (!existingMemberId) {
+        // Check for duplicate IC only on new registrations
+        const q = query(collection(db, 'members'), where('icNumber', '==', formData.icNumber));
+        const querySnapshot = await getDocs(q);
+        
+        if (!querySnapshot.empty) {
+          setError(current.duplicateIC);
+          setIsSubmitting(false);
+          return;
+        }
       }
 
-      const newMember: Partial<Member> = {
+      const memberData: Partial<Member> = {
         ...formData,
         membershipType,
         photoBase64: previews.photo || '',
         receiptBase64: previews.receipt || '',
-        status: 'pending',
-        createdAt: serverTimestamp(),
-        applicantUid: auth.currentUser?.uid,
-        applicantEmail: auth.currentUser?.email || '',
+        updatedAt: serverTimestamp(),
       };
 
-      const docRef = await addDoc(collection(db, 'members'), newMember);
-      
-      logActivity({
-        category: 'member',
-        action: 'New Membership Application',
-        details: `New application submitted by ${newMember.fullName}.`,
-        targetMemberId: docRef.id
-      });
+      if (existingMemberId) {
+        await updateDoc(doc(db, 'members', existingMemberId), memberData);
+        logActivity({
+          category: 'member',
+          action: 'Membership Application Updated',
+          details: `Application updated by ${memberData.fullName}.`,
+          targetMemberId: existingMemberId
+        });
+      } else {
+        const newMember = {
+          ...memberData,
+          status: 'pending',
+          createdAt: serverTimestamp(),
+          applicantUid: auth.currentUser?.uid,
+          applicantEmail: auth.currentUser?.email || '',
+        };
+        const docRef = await addDoc(collection(db, 'members'), newMember);
+        logActivity({
+          category: 'member',
+          action: 'New Membership Application',
+          details: `New application submitted by ${newMember.fullName}.`,
+          targetMemberId: docRef.id
+        });
+      }
 
-      setSuccessId('PENDING'); 
+      setSuccessId(existingMemberId ? 'UPDATED' : 'PENDING'); 
       window.scrollTo(0, 0);
     } catch (err: any) {
       handleFirestoreError(err, OperationType.WRITE, 'members');
@@ -322,7 +328,7 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="max-w-md mx-auto bg-white p-8 md:p-12 rounded-[2.5rem] shadow-2xl border border-slate-100 mt-12"
+        className={`max-w-md mx-auto ${theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100'} p-8 md:p-12 rounded-[2.5rem] shadow-2xl border mt-12`}
       >
         <AnimatePresence mode="wait">
           {!isEmailMode ? (
@@ -333,16 +339,16 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
               exit={{ opacity: 0, x: 20 }}
               className="text-center"
             >
-              <div className="w-20 h-20 bg-turquoise/10 flex items-center justify-center rounded-3xl mx-auto mb-8">
+              <div className={`w-20 h-20 ${theme === 'dark' ? 'bg-turquoise/5' : 'bg-turquoise/10'} flex items-center justify-center rounded-3xl mx-auto mb-8`}>
                 <LogIn className="w-10 h-10 text-turquoise" />
               </div>
-              <h2 className="text-3xl font-black text-slate-800 mb-4 tracking-tight">{current.loginTitle}</h2>
-              <p className="text-slate-500 font-medium text-sm leading-relaxed mb-10">
+              <h2 className={`text-3xl font-black ${theme === 'dark' ? 'text-slate-100' : 'text-slate-800'} mb-4 tracking-tight`}>{current.loginTitle}</h2>
+              <p className={`${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'} font-medium text-sm leading-relaxed mb-10`}>
                 {current.loginDesc}
               </p>
               <button 
                 onClick={handleLogin}
-                className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-2xl flex items-center justify-center gap-3 transition-all active:scale-[0.98] shadow-xl shadow-slate-200 mb-6"
+                className={`w-full py-4 ${theme === 'dark' ? 'bg-white text-slate-900' : 'bg-slate-900 text-white'} font-black rounded-2xl flex items-center justify-center gap-3 transition-all active:scale-[0.98] shadow-xl mb-6`}
               >
                 <svg className="w-5 h-5" viewBox="0 0 24 24">
                   <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -371,13 +377,13 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
                 onClick={() => { setIsEmailMode(false); setAuthError(null); }}
                 className="mb-8 flex items-center gap-2 text-slate-400 font-bold text-[10px] uppercase tracking-widest hover:text-slate-600 transition-colors"
               >
-                <ArrowLeft className="w-3 h-3" /> {lang === 'bm' ? 'Kembali ke Google' : 'Back to Google'}
+                <ArrowLeft className="w-3 h-3" /> Kembali ke Google
               </button>
 
-              <div className="w-16 h-16 bg-slate-900 text-white flex items-center justify-center rounded-2xl mb-6">
+              <div className={`w-16 h-16 ${theme === 'dark' ? 'bg-slate-100 text-slate-900' : 'bg-slate-900 text-white'} flex items-center justify-center rounded-2xl mb-6`}>
                 <Mail className="w-8 h-8" />
               </div>
-              <h2 className="text-2xl font-black text-slate-800 mb-6 tracking-tight">
+              <h2 className={`text-2xl font-black ${theme === 'dark' ? 'text-white' : 'text-slate-800'} mb-6 tracking-tight`}>
                 {authMode === 'register' ? current.registerTitle : current.loginEmailTitle}
               </h2>
 
@@ -390,7 +396,7 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
                     <input 
                       required 
                       type="text" 
-                      className="input-bento" 
+                      className={`input-bento ${theme === 'dark' ? 'bg-slate-800 border-slate-700 text-white' : ''}`} 
                       value={authName} 
                       onChange={(e) => setAuthName(e.target.value)} 
                     />
@@ -403,7 +409,7 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
                   <input 
                     required 
                     type="email" 
-                    className="input-bento" 
+                    className={`input-bento ${theme === 'dark' ? 'bg-slate-800 border-slate-700 text-white' : ''}`} 
                     value={authEmail} 
                     onChange={(e) => setAuthEmail(e.target.value)} 
                   />
@@ -416,7 +422,7 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
                     <input 
                       required 
                       type={showPassword ? "text" : "password"} 
-                      className="input-bento pr-12" 
+                      className={`input-bento pr-12 ${theme === 'dark' ? 'bg-slate-800 border-slate-700 text-white' : ''}`} 
                       value={authPassword} 
                       onChange={(e) => setAuthPassword(e.target.value)} 
                       minLength={6}
@@ -451,17 +457,15 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
                       setAuthMode(authMode === 'login' ? 'register' : 'login');
                       setAuthError(null);
                     }}
-                    className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-turquoise transition-colors"
+                    className={`text-[10px] font-black ${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'} uppercase tracking-widest hover:text-turquoise transition-colors`}
                   >
                     {authMode === 'login' ? current.noAccount : current.hasAccount}
                   </button>
                 </div>
 
-                <div className="p-4 bg-amber-50 border border-amber-100 rounded-2xl mt-6">
-                  <p className="text-[9px] font-bold text-amber-700 leading-tight">
-                    {lang === 'bm' 
-                      ? "NOTA: Sila pastikan penyedia 'Email/Password' telah diaktifkan dalam Firebase Console anda."
-                      : "NOTE: Please ensure 'Email/Password' provider is enabled in your Firebase Console."}
+                <div className={`p-4 ${theme === 'dark' ? 'bg-amber-900/10 border-amber-900/30' : 'bg-amber-50 border-amber-100'} rounded-2xl mt-6`}>
+                  <p className={`text-[9px] font-bold ${theme === 'dark' ? 'text-amber-500' : 'text-amber-700'} leading-tight`}>
+                    NOTA: Sila pastikan penyedia 'Email/Password' telah diaktifkan dalam Firebase Console anda.
                   </p>
                 </div>
               </form>
@@ -477,16 +481,16 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
       <motion.div 
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
-        className="max-w-md mx-auto bg-white p-8 rounded-3xl shadow-xl text-center border-2 border-turquoise"
+        className="max-w-md mx-auto bg-white p-8 rounded-3xl shadow-xl text-center border-2 border-turquoise text-slate-800"
       >
         <div className="flex justify-center mb-6">
           <div className="bg-turquoise/20 p-4 rounded-full">
             <CheckCircle className="w-16 h-16 text-turquoise" />
           </div>
         </div>
-        <h2 className="text-3xl font-bold text-gray-800 mb-4">{current.successTitle}</h2>
+        <h2 className="text-3xl font-bold text-gray-800 mb-4">{successId === 'UPDATED' ? 'Kemaskini Berjaya!' : current.successTitle}</h2>
         <p className="text-gray-600 mb-8 leading-relaxed">
-          {current.successMsg}
+          {successId === 'UPDATED' ? 'Maklumat permohonan anda telah dikemaskini.' : current.successMsg}
         </p>
         <div className="bg-gray-50 p-6 rounded-2xl mb-8">
           <p className="text-[10px] font-black text-turquoise-dark uppercase tracking-[0.2em]">PERMOHONAN BAHARU</p>
@@ -503,8 +507,8 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
   }
 
   return (
-    <div className="max-w-4xl mx-auto px-4 mt-8 pb-12">
-      <div className="bg-white/50 backdrop-blur-md p-4 rounded-3xl mb-8 flex flex-col md:flex-row items-center justify-between gap-4 border border-white/20">
+    <div className="max-w-4xl mx-auto px-4 mt-8 pb-12 text-slate-800">
+      <div className="bg-white/70 backdrop-blur-md p-4 rounded-3xl mb-8 flex flex-col md:flex-row items-center justify-between gap-4 border border-white/20">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl overflow-hidden shadow-lg border-2 border-white">
             <img src={currentUser.photoURL || `https://ui-avatars.com/api/?name=${currentUser.displayName}`} alt="Profile" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
@@ -518,11 +522,11 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
           onClick={() => auth.signOut()}
           className="px-6 py-2 bg-slate-900/5 hover:bg-slate-900/10 text-slate-600 font-bold text-[10px] uppercase tracking-widest rounded-xl transition-all"
         >
-          {lang === 'bm' ? 'Tukar Akaun' : 'Switch Account'}
+          Tukar Akaun
         </button>
       </div>
       <div className="mb-12">
-        <h2 className="text-4xl font-black text-slate-800 tracking-tighter italic">{current.title}</h2>
+        <h2 className="text-4xl font-black text-slate-800 tracking-tighter italic">{existingMemberId ? 'Kemaskini Permohonan' : current.title}</h2>
         <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest">{current.clubName}</p>
       </div>
 
@@ -592,11 +596,11 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="md:col-span-2">
               <label className="label-bento">{current.fullName}</label>
-              <input required type="text" className="input-bento" placeholder="..." value={formData.fullName || ''} onChange={(e) => setFormData({ ...formData, fullName: e.target.value })} />
+              <input required type="text" className="input-bento" placeholder="..." value={formData.fullName || ''} onChange={(e) => setFormData({ ...formData, fullName: e.target.value.toUpperCase() })} />
             </div>
             <div>
               <label className="label-bento">{current.icNumber}</label>
-              <input required type="text" className="input-bento" placeholder="000101-12-0000" value={formData.icNumber || ''} onChange={(e) => handleICChange(e.target.value)} />
+              <input required type="text" className="input-bento" placeholder="000101-12-0000" value={formData.icNumber || ''} onChange={(e) => handleICChange(e.target.value.toUpperCase())} />
             </div>
             <div>
               <label className="label-bento">{current.dob}</label>
@@ -605,13 +609,13 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
             <div>
               <label className="label-bento">{current.gender}</label>
               <select className="input-bento" value={formData.gender || ''} onChange={(e) => setFormData({ ...formData, gender: e.target.value as any })}>
-                <option value="Lelaki">{lang === 'bm' ? 'Lelaki' : 'Male'}</option>
-                <option value="Perempuan">{lang === 'bm' ? 'Perempuan' : 'Female'}</option>
+                <option value="Lelaki">Lelaki</option>
+                <option value="Perempuan">Perempuan</option>
               </select>
             </div>
             <div>
               <label className="label-bento">{current.phone}</label>
-              <input type="tel" className="input-bento" placeholder="012-3456789" value={formData.phone || ''} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} />
+              <input type="tel" className="input-bento" placeholder="+60123456789" value={formData.phone || ''} onChange={(e) => setFormData({ ...formData, phone: formatPhone(e.target.value) })} />
             </div>
             <div className="md:col-span-2">
               <label className="label-bento">{current.email}</label>
@@ -619,7 +623,7 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
             </div>
             <div className="md:col-span-2">
               <label className="label-bento">{current.address}</label>
-              <input type="text" className="input-bento" placeholder="..." value={formData.address || ''} onChange={(e) => setFormData({ ...formData, address: e.target.value })} />
+              <input type="text" className="input-bento" placeholder="..." value={formData.address || ''} onChange={(e) => setFormData({ ...formData, address: e.target.value.toUpperCase() })} />
             </div>
           </div>
 
@@ -633,15 +637,15 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div>
                   <label className="label-bento">{current.guardianName}</label>
-                  <input type="text" required className="input-bento" value={formData.guardianName || ''} onChange={(e) => setFormData({ ...formData, guardianName: e.target.value })} />
+                  <input type="text" required className="input-bento" value={formData.guardianName || ''} onChange={(e) => setFormData({ ...formData, guardianName: e.target.value.toUpperCase() })} />
                 </div>
                 <div>
                   <label className="label-bento">{current.guardianIc}</label>
-                  <input type="text" required className="input-bento" placeholder="000000-00-0000" value={formData.guardianIc || ''} onChange={(e) => setFormData({ ...formData, guardianIc: e.target.value })} />
+                  <input type="text" required className="input-bento" placeholder="000000-00-0000" value={formData.guardianIc || ''} onChange={(e) => setFormData({ ...formData, guardianIc: formatIC(e.target.value.toUpperCase()) })} />
                 </div>
                 <div>
                   <label className="label-bento">{current.guardianPhone}</label>
-                  <input type="tel" required className="input-bento" value={formData.guardianPhone || ''} onChange={(e) => setFormData({ ...formData, guardianPhone: e.target.value })} />
+                  <input type="tel" required className="input-bento" placeholder="+60123456789" value={formData.guardianPhone || ''} onChange={(e) => setFormData({ ...formData, guardianPhone: formatPhone(e.target.value) })} />
                 </div>
               </div>
             </motion.div>
@@ -757,7 +761,7 @@ export default function RegistrationForm({ settings, lang }: { settings: any, la
                 disabled={isSubmitting}
                 className="w-full bg-turquoise hover:bg-turquoise-dark text-white font-black py-4 rounded-xl transition-all shadow-lg shadow-turquoise/20 flex items-center justify-center gap-3 text-sm uppercase tracking-widest"
               >
-                {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : current.submitBtn}
+                {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : (existingMemberId ? 'Kemaskini Permohonan' : current.submitBtn)}
               </button>
             </div>
           </div>
