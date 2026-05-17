@@ -23,6 +23,7 @@ export async function logActivity(entry: Omit<LogEntry, 'id' | 'timestamp' | 'ad
     if (user) {
       logData.adminId = user.uid;
       logData.adminEmail = user.email || 'unknown';
+      logData.adminName = user.displayName || undefined;
     } else {
       logData.adminEmail = 'SYSTEM / PUBLIC';
     }

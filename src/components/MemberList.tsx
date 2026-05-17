@@ -415,6 +415,37 @@ export default function MemberList({
     return () => unsubscribe();
   }, [selectedMemberForDetail?.id, isAdmin]);
 
+  const toggleAnnualPayment = async (memberId: string, year: number, isPaid: boolean) => {
+    if (!isAdmin) return;
+    
+    try {
+      const member = members.find(m => m.id === memberId);
+      if (!member) return;
+
+      const currentPayments = member.annualPayments || [];
+      let newPayments;
+      
+      if (isPaid) {
+        newPayments = [...currentPayments.filter(p => p.year !== year), { year, paid: true, verifiedAt: new Date() }];
+      } else {
+        newPayments = currentPayments.filter(p => p.year !== year);
+      }
+
+      await updateDoc(doc(db, 'members', memberId), { annualPayments: newPayments });
+      
+      logActivity({
+        category: 'payment',
+        action: isPaid ? 'Annual Fee Paid' : 'Annual Fee Reset',
+        details: `Yuran tahunan (${year}) ditanda sebagai ${isPaid ? 'TELAH DIBAYAR' : 'BELUM DIBAYAR'} untuk ${member.fullName} oleh admin.`,
+        targetMemberId: memberId,
+        targetMemberName: member.fullName
+      });
+    } catch (err) {
+      console.error("Toggle payment failed:", err);
+      alert("Gagal mengemaskini status yuran.");
+    }
+  };
+
   const current = (t as any).bm;
 
   useEffect(() => {
@@ -523,8 +554,9 @@ export default function MemberList({
       logActivity({
         category: 'member',
         action: 'Member Deleted',
-        details: `Member ${memberName} (${memberId}) was removed by admin.`,
-        targetMemberId: memberId
+        details: `Ahli ${memberName} (${memberId}) telah dibuang daripada sistem oleh admin.`,
+        targetMemberId: memberId,
+        targetMemberName: memberName
       });
 
       setDeletingMember(null);
@@ -564,12 +596,16 @@ export default function MemberList({
         
         transaction.set(counterDocRef, { count: newCount }, { merge: true });
 
+        const memberSnap = await transaction.get(doc(db, 'members', id));
+        const memberName = memberSnap.exists() ? memberSnap.data().fullName : id;
+
         // Log the activity
         logActivity({
           category: 'member',
           action: 'Member Verified',
-          details: `Member verified with ID ${membershipId}`,
-          targetMemberId: id
+          details: `Ahli ${memberName} telah disahkan dengan No. Ahli ${membershipId}.`,
+          targetMemberId: id,
+          targetMemberName: memberName
         });
       });
     } catch (err) {
@@ -604,8 +640,9 @@ export default function MemberList({
           logActivity({
             category: 'payment',
             action: 'Registration Fee Paid',
-            details: `Registration fee marked as PAID for ${editingMember.fullName} on ${payDate}.`,
-            targetMemberId: id
+            details: `Yuran pendaftaran ditanda sebagai TELAH DIBAYAR untuk ${editingMember.fullName} pada ${payDate}.`,
+            targetMemberId: id,
+            targetMemberName: editingMember.fullName
           });
         }
 
@@ -614,8 +651,9 @@ export default function MemberList({
           logActivity({
             category: 'payment',
             action: 'Annual Fee Paid',
-            details: `Annual fee (${currentYear}) marked as PAID for ${editingMember.fullName} on ${payDate}.`,
-            targetMemberId: id
+            details: `Yuran tahunan (${currentYear}) ditanda sebagai TELAH DIBAYAR untuk ${editingMember.fullName} pada ${payDate}.`,
+            targetMemberId: id,
+            targetMemberName: editingMember.fullName
           });
         }
 
@@ -631,8 +669,9 @@ export default function MemberList({
       logActivity({
         category: 'member',
         action: 'Member Updated',
-        details: `Member ${editingMember.fullName} information updated by admin.`,
-        targetMemberId: id
+        details: `Maklumat profil ahli ${editingMember.fullName} telah dikemaskini oleh admin.`,
+        targetMemberId: id,
+        targetMemberName: editingMember.fullName
       });
 
       setEditingMember(null);
@@ -1189,24 +1228,17 @@ export default function MemberList({
                             return years.map(year => {
                               const payment = editingMember.annualPayments?.find(p => p.year === year);
                               return (
-                                <div key={year} className="flex flex-col p-3 bg-white rounded-xl border border-slate-100 shadow-sm gap-2">
-                                  <span className="text-[9px] font-black text-slate-400">{year}</span>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const others = (editingMember.annualPayments || []).filter(p => p.year !== year);
-                                      if (payment?.paid) {
-                                        setEditingMember({...editingMember, annualPayments: others});
-                                      } else {
-                                        setEditingMember({...editingMember, annualPayments: [...others, { year, paid: true, verifiedAt: new Date() }]});
-                                      }
-                                    }}
-                                    className={`w-full py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all ${payment?.paid ? 'bg-teal-500 text-white shadow-md' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}
-                                  >
-                                    {payment?.paid ? 'Dibayar' : 'Bayar'}
-                                  </button>
-                                </div>
-                              );
+                              <div key={year} className="flex flex-col p-3 bg-white rounded-xl border border-slate-100 shadow-sm gap-2">
+                                <span className="text-[9px] font-black text-slate-400">{year}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => toggleAnnualPayment(editingMember.id!, year, !payment?.paid)}
+                                  className={`w-full py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all ${payment?.paid ? 'bg-teal-500 text-white shadow-md' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}
+                                >
+                                  {payment?.paid ? 'Dibayar' : 'Bayar'}
+                                </button>
+                              </div>
+                            );
                             });
                           })()}
                         </div>
@@ -1350,7 +1382,9 @@ export default function MemberList({
 
       {/* Member Detail Card Redesign (Public & Admin) */}
       <AnimatePresence>
-        {selectedMemberForDetail && (
+        {selectedMemberForDetail && (() => {
+          const m = members.find(mem => mem.id === selectedMemberForDetail.id) || selectedMemberForDetail;
+          return (
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -1362,7 +1396,7 @@ export default function MemberList({
               initial={{ scale: 0.9, y: 50, rotateX: 20 }}
               animate={{ scale: 1, y: 0, rotateX: 0 }}
               exit={{ scale: 0.9, y: 50, rotateX: 20 }}
-              className={`w-full max-w-sm rounded-[3rem] overflow-hidden shadow-[0_50px_100px_-20px_rgba(0,0,0,0.5)] relative border-4 border-white/20 bg-slate-900 group`}
+              className={`w-full max-w-sm rounded-[3rem] overflow-hidden shadow-[0_50px_100px_-20px_rgba(0,0,0,0.5)] relative border-4 border-white/20 bg-slate-900 group max-h-[90vh] overflow-y-auto custom-scrollbar`}
               onClick={e => e.stopPropagation()}
             >
               {/* Card Header/Banner */}
@@ -1388,19 +1422,19 @@ export default function MemberList({
               <div className="relative px-8 -mt-16 flex justify-center">
                 <div className="relative">
                   <div className="w-32 h-32 rounded-[2.5rem] overflow-hidden bg-slate-800 border-8 border-slate-900 shadow-2xl relative z-10">
-                    {selectedMemberForDetail.photoBase64 ? (
-                      <img src={selectedMemberForDetail.photoBase64} className="w-full h-full object-cover" />
+                    {m.photoBase64 ? (
+                      <img src={m.photoBase64} className="w-full h-full object-cover" />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center font-black text-turquoise text-4xl">
-                        {(selectedMemberForDetail.fullName || '').substring(0, 2).toUpperCase()}
+                        {(m.fullName || '').substring(0, 2).toUpperCase()}
                       </div>
                     )}
                   </div>
                   {/* Status Badge Over Photo */}
                   <div className={`absolute -right-2 -bottom-2 z-20 w-8 h-8 rounded-2xl flex items-center justify-center shadow-lg border-2 border-slate-900 ${
-                    selectedMemberForDetail.status === 'verified' ? 'bg-teal-500 text-white' : 'bg-orange-500 text-white'
+                    m.status === 'verified' ? 'bg-teal-500 text-white' : 'bg-orange-500 text-white'
                   }`}>
-                    {selectedMemberForDetail.status === 'verified' ? <ShieldCheck className="w-4 h-4" /> : <Clock className="w-4 h-4" />}
+                    {m.status === 'verified' ? <ShieldCheck className="w-4 h-4" /> : <Clock className="w-4 h-4" />}
                   </div>
                 </div>
               </div>
@@ -1409,10 +1443,10 @@ export default function MemberList({
               <div className="p-8 pt-6">
                 <div className="text-center mb-8">
                   <h2 className="text-xl font-black text-white tracking-tight mb-1 uppercase">
-                    {(selectedMemberForDetail.fullName || '').toUpperCase()}
+                    {(m.fullName || '').toUpperCase()}
                   </h2>
                   <p className="text-[10px] font-bold text-turquoise uppercase tracking-[0.3em]">
-                    {(selectedMemberForDetail.membershipType || '').toUpperCase()}
+                    {(m.membershipType || '').toUpperCase()}
                   </p>
                 </div>
 
@@ -1420,21 +1454,59 @@ export default function MemberList({
                 <div className="bg-white/5 rounded-[2rem] p-6 mb-6 border border-white/5 text-center">
                   <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2">Nombor Keahlian</p>
                   <p className="text-3xl font-black font-mono text-white tracking-tighter">
-                    {(selectedMemberForDetail.membershipId || 'PENDING').toUpperCase()}
+                    {(m.membershipId || 'PENDING').toUpperCase()}
                   </p>
                 </div>
 
                 {/* Details Grid */}
-                <div className="grid grid-cols-2 gap-4 mb-8">
+                <div className="grid grid-cols-2 gap-4 mb-6">
                   <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
                     <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Jantina</p>
-                    <p className="text-xs font-bold text-slate-300 uppercase">{(selectedMemberForDetail.gender || '').toUpperCase()}</p>
+                    <p className="text-xs font-bold text-slate-300 uppercase">{(m.gender || '').toUpperCase()}</p>
                   </div>
                   <div className="bg-white/5 rounded-2xl p-4 border border-white/5 text-right">
                     <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Berdaftar</p>
                     <p className="text-xs font-bold text-slate-300 uppercase">
-                      {selectedMemberForDetail.createdAt ? format(selectedMemberForDetail.createdAt.toDate(), 'dd/MM/yy') : '-'}
+                      {m.createdAt ? format(m.createdAt.toDate(), 'dd/MM/yy') : '-'}
                     </p>
+                  </div>
+                </div>
+
+                {/* Annual Payment History Section */}
+                <div className="mb-6 p-6 bg-white/5 rounded-[2.5rem] border border-white/5">
+                  <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4 text-center">Rekod Yuran Tahunan</h4>
+                  <div className="grid grid-cols-2 gap-3">
+                    {(() => {
+                      const startYear = m.createdAt ? m.createdAt.toDate().getFullYear() : new Date().getFullYear();
+                      const currentYear = new Date().getFullYear();
+                      const years = [];
+                      for (let y = currentYear; y >= startYear; y--) {
+                        years.push(y);
+                      }
+                      return years.map(year => {
+                        const payment = m.annualPayments?.find(p => p.year === year);
+                        const isPaid = !!payment?.paid;
+                        
+                        return (
+                          <div key={year} className="flex flex-col bg-slate-800/50 rounded-2xl p-3 border border-white/5 relative overflow-hidden group/pay">
+                             <div className="flex justify-between items-center mb-2">
+                               <span className="text-[10px] font-black text-slate-400">{year}</span>
+                               <span className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded ${isPaid ? 'bg-teal-500 text-white' : 'bg-slate-700 text-slate-500'}`}>
+                                 {isPaid ? 'Paid' : 'Unpaid'}
+                               </span>
+                             </div>
+                             {isAdmin && (
+                               <button
+                                 onClick={() => toggleAnnualPayment(m.id!, year, !isPaid)}
+                                 className={`w-full py-2 rounded-xl text-[8px] font-black uppercase tracking-widest transition-all ${isPaid ? 'bg-red-500/20 text-red-400 hover:bg-red-500 hover:text-white' : 'bg-turquoise/20 text-turquoise hover:bg-turquoise hover:text-white'}`}
+                               >
+                                 {isPaid ? 'Reset' : 'Verify'}
+                               </button>
+                             )}
+                          </div>
+                        );
+                      });
+                    })()}
                   </div>
                 </div>
 
@@ -1463,14 +1535,14 @@ export default function MemberList({
                 {/* Actions */}
                 <div className="flex gap-3">
                   <button 
-                    onClick={() => handleShare(selectedMemberForDetail)}
+                    onClick={() => handleShare(m)}
                     className="flex-1 px-6 py-4 bg-white/5 hover:bg-white/10 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 border border-white/5"
                   >
                     <Share2 className="w-4 h-4" /> Share
                   </button>
                   {isAdmin && (
                     <button 
-                      onClick={() => exportMembershipCard(selectedMemberForDetail)}
+                      onClick={() => exportMembershipCard(m)}
                       className="flex-1 px-6 py-4 bg-turquoise hover:bg-turquoise-dark text-white rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 shadow-lg shadow-turquoise/20"
                     >
                       <Download className="w-4 h-4" /> Kad PDF
@@ -1484,7 +1556,8 @@ export default function MemberList({
               <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full blur-[40px] pointer-events-none" />
             </motion.div>
           </motion.div>
-        )}
+          );
+        })()}
       </AnimatePresence>
 
       {/* Delete Confirmation Modal */}

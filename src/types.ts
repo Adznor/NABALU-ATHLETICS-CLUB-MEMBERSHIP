@@ -43,8 +43,10 @@ export interface LogEntry {
   details: string;
   adminId?: string;
   adminEmail?: string;
+  adminName?: string;
   timestamp: any;
   targetMemberId?: string;
+  targetMemberName?: string;
 }
 
 export interface ClubSettings {

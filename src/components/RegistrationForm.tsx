@@ -293,8 +293,9 @@ export default function RegistrationForm({ settings, theme }: { settings: any, t
         logActivity({
           category: 'member',
           action: 'Membership Application Updated',
-          details: `Application updated by ${memberData.fullName}.`,
-          targetMemberId: existingMemberId
+          details: `Permohonan keahlian telah dikemaskini oleh ${memberData.fullName}.`,
+          targetMemberId: existingMemberId,
+          targetMemberName: memberData.fullName
         });
       } else {
         const newMember = {
@@ -308,8 +309,9 @@ export default function RegistrationForm({ settings, theme }: { settings: any, t
         logActivity({
           category: 'member',
           action: 'New Membership Application',
-          details: `New application submitted by ${newMember.fullName}.`,
-          targetMemberId: docRef.id
+          details: `Permohonan keahlian baharu telah dihantar oleh ${newMember.fullName}.`,
+          targetMemberId: docRef.id,
+          targetMemberName: newMember.fullName
         });
       }
 
@@ -437,38 +439,32 @@ export default function RegistrationForm({ settings, theme }: { settings: any, t
                   </div>
                 </div>
 
-                {authError && (
-                  <div className="p-3 bg-red-50 border border-red-100 rounded-xl text-[10px] font-bold text-red-500 uppercase tracking-tight">
-                    {authError}
-                  </div>
-                )}
+                  {authError && (
+                    <div className="p-3 bg-red-50 border border-red-100 rounded-xl text-[10px] font-bold text-red-500 uppercase tracking-tight">
+                      {authError}
+                    </div>
+                  )}
 
-                <button 
-                  disabled={isAuthLoading}
-                  className="w-full py-4 bg-turquoise hover:bg-turquoise-dark text-white font-black rounded-2xl flex items-center justify-center gap-3 transition-all active:scale-[0.98] shadow-xl shadow-turquoise/20 mt-4 h-[56px]"
-                >
-                  {isAuthLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : (authMode === 'register' ? current.registerBtn : current.loginEmailTitle)}
-                </button>
-
-                <div className="text-center pt-4">
                   <button 
-                    type="button"
-                    onClick={() => {
-                      setAuthMode(authMode === 'login' ? 'register' : 'login');
-                      setAuthError(null);
-                    }}
-                    className={`text-[10px] font-black ${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'} uppercase tracking-widest hover:text-turquoise transition-colors`}
+                    disabled={isAuthLoading}
+                    className="w-full py-4 bg-turquoise hover:bg-turquoise-dark text-white font-black rounded-2xl flex items-center justify-center gap-3 transition-all active:scale-[0.98] shadow-xl shadow-turquoise/20 mt-4 h-[56px]"
                   >
-                    {authMode === 'login' ? current.noAccount : current.hasAccount}
+                    {isAuthLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : (authMode === 'register' ? current.registerBtn : current.loginEmailTitle)}
                   </button>
-                </div>
 
-                <div className={`p-4 ${theme === 'dark' ? 'bg-amber-900/10 border-amber-900/30' : 'bg-amber-50 border-amber-100'} rounded-2xl mt-6`}>
-                  <p className={`text-[9px] font-bold ${theme === 'dark' ? 'text-amber-500' : 'text-amber-700'} leading-tight`}>
-                    NOTA: Sila pastikan penyedia 'Email/Password' telah diaktifkan dalam Firebase Console anda.
-                  </p>
-                </div>
-              </form>
+                  <div className="text-center pt-4">
+                    <button 
+                      type="button"
+                      onClick={() => {
+                        setAuthMode(authMode === 'login' ? 'register' : 'login');
+                        setAuthError(null);
+                      }}
+                      className={`text-[10px] font-black ${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'} uppercase tracking-widest hover:text-turquoise transition-colors`}
+                    >
+                      {authMode === 'login' ? current.noAccount : current.hasAccount}
+                    </button>
+                  </div>
+                </form>
             </motion.div>
           )}
         </AnimatePresence>

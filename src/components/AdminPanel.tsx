@@ -28,6 +28,8 @@ export default function AdminPanel({ onLogout, settings, theme, isAdminViaPasswo
   const [usersLoading, setUsersLoading] = useState(true);
   const [userSearchTerm, setUserSearchTerm] = useState('');
   const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
+  const [userToDelete, setUserToDelete] = useState<{id: string, email: string} | null>(null);
+  const [isDeletingUser, setIsDeletingUser] = useState(false);
 
   const [showResetModal, setShowResetModal] = useState(false);
   const [resetStep, setResetStep] = useState<1 | 2 | 3>(1);
@@ -80,13 +82,26 @@ export default function AdminPanel({ onLogout, settings, theme, isAdminViaPasswo
     }
   };
 
-  const handleDeleteUser = async (userId: string, email: string) => {
-    if (!confirm(`Padam rekod profil pengguna ${email}? Tindakan ini tidak memadam akaun Firebase Auth, hanya rekod dalam pangkalan data admin.`)) return;
+  const confirmDeleteUser = async () => {
+    if (!userToDelete) return;
+    setIsDeletingUser(true);
     try {
-      await deleteDoc(doc(db, 'users', userId));
+      await deleteDoc(doc(db, 'users', userToDelete.id));
+      
+      logActivity({
+        category: 'system',
+        action: 'User Deleted',
+        details: `Rekod profil pengguna ${userToDelete.email} telah dipadam oleh admin.`,
+        adminName: auth.currentUser?.displayName || undefined
+      });
+      
       alert("Rekod pengguna telah dipadam.");
+      setUserToDelete(null);
     } catch (err) {
+      console.error(err);
       alert("Gagal memadam rekod pengguna.");
+    } finally {
+      setIsDeletingUser(false);
     }
   };
 
@@ -106,10 +121,14 @@ export default function AdminPanel({ onLogout, settings, theme, isAdminViaPasswo
       const newRole = currentRole === 'sub_admin' ? null : 'sub_admin';
       await updateDoc(doc(db, 'users', userId), { role: newRole, updatedAt: serverTimestamp() });
       
+      const userToUpdate = appUsers.find(u => u.id === userId);
+      const userDisplay = userToUpdate ? (userToUpdate.displayName || userToUpdate.email) : userId;
+
       logActivity({
         category: 'system',
         action: newRole === 'sub_admin' ? 'Promoted to Sub-Admin' : 'Demoted from Sub-Admin',
-        details: `${userId} role updated to ${newRole || 'User'}`
+        details: `Peranan ${userDisplay} dikemaskini kepada ${newRole || 'User'} oleh Super Admin.`,
+        adminName: auth.currentUser?.displayName || undefined
       });
     } catch (err) {
       console.error("Failed to update role:", err);
@@ -230,7 +249,8 @@ export default function AdminPanel({ onLogout, settings, theme, isAdminViaPasswo
       logActivity({
         category: 'system',
         action: 'Settings Updated',
-        details: 'Club profile and settings were modified by admin.'
+        details: `Profil kelab dan tetapan aplikasi telah dikemaskini oleh admin (${auth.currentUser?.displayName || auth.currentUser?.email}).`,
+        adminName: auth.currentUser?.displayName || undefined
       });
       
       alert("Tetapan telah berjaya disimpan!");
@@ -271,9 +291,10 @@ export default function AdminPanel({ onLogout, settings, theme, isAdminViaPasswo
   const handleResetSystem = async () => {
     setIsResetting(true);
     try {
+      const batchSize = 100;
+
+      // Reset Members
       const memberSnapshot = await getDocs(collection(db, 'members'));
-      const batchSize = 100; 
-      
       for (let i = 0; i < memberSnapshot.docs.length; i += batchSize) {
         const batch = writeBatch(db);
         const chunk = memberSnapshot.docs.slice(i, i + batchSize);
@@ -281,6 +302,7 @@ export default function AdminPanel({ onLogout, settings, theme, isAdminViaPasswo
         await batch.commit();
       }
 
+      // Reset Logs
       const logSnapshot = await getDocs(collection(db, 'logs'));
       for (let i = 0; i < logSnapshot.docs.length; i += batchSize) {
         const batch = writeBatch(db);
@@ -289,15 +311,30 @@ export default function AdminPanel({ onLogout, settings, theme, isAdminViaPasswo
         await batch.commit();
       }
 
+      // Reset Users (except super admin)
+      const userSnapshot = await getDocs(collection(db, 'users'));
+      for (let i = 0; i < userSnapshot.docs.length; i += batchSize) {
+        const batch = writeBatch(db);
+        const chunk = userSnapshot.docs.slice(i, i + batchSize);
+        chunk.forEach(userDoc => {
+          const userData = userDoc.data();
+          if (userData.email !== SUPER_ADMIN_EMAIL) {
+            batch.delete(userDoc.ref);
+          }
+        });
+        await batch.commit();
+      }
+
       await setDoc(doc(db, 'counters', 'members'), { count: 0 });
 
       await logActivity({
         category: 'system',
         action: 'System Full Reset',
-        details: 'Seluruh sistem telah disifar semula oleh super admin.'
+        details: `Seluruh sistem (Ahli, Log & Akaun Pengguna) telah disifar semula oleh Super Admin (${auth.currentUser?.displayName || auth.currentUser?.email}).`,
+        adminName: auth.currentUser?.displayName || undefined
       });
 
-      alert("Penyifaran semula berjaya!");
+      alert("Penyifaran semula berjaya! Semua data (ahli, log, dan akaun pengguna) telah dipadamkan kecuali akaun Super Admin.");
       handleCloseResetModal();
     } catch (err) {
       console.error(err);
@@ -446,6 +483,14 @@ export default function AdminPanel({ onLogout, settings, theme, isAdminViaPasswo
               <div>
                 <h3 className={`text-xl font-black tracking-tight ${theme === 'dark' ? 'text-white' : 'text-slate-800'}`}>Pengurusan Pengguna</h3>
                 <p className={`text-[10px] font-black uppercase tracking-widest mt-1 ${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'}`}>Senarai akaun berdaftar dalam aplikasi</p>
+                {adminRole === 'super' && (
+                  <button 
+                    onClick={() => setActiveTab('settings')}
+                    className="text-[9px] font-black text-red-500 uppercase tracking-widest mt-2 hover:underline flex items-center gap-1"
+                  >
+                    <AlertTriangle className="w-3 h-3" /> Tukar ke Tetapan untuk Sifar Semua Akaun
+                  </button>
+                )}
               </div>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
@@ -550,9 +595,9 @@ export default function AdminPanel({ onLogout, settings, theme, isAdminViaPasswo
                           >
                             <Key className="w-3.5 h-3.5" /> Reset
                           </button>
-                          {auth.currentUser?.email === SUPER_ADMIN_EMAIL && (
+                          {(adminRole === 'super' || (adminRole === 'sub' && u.role !== 'sub_admin' && u.email !== SUPER_ADMIN_EMAIL)) && u.email !== SUPER_ADMIN_EMAIL && (
                             <button 
-                              onClick={() => handleDeleteUser(u.id, u.email)}
+                              onClick={() => setUserToDelete({id: u.id, email: u.email})}
                               className="p-2.5 text-red-400 hover:bg-red-50 hover:text-red-500 rounded-xl transition-all"
                               title="Padam Rekod"
                             >
@@ -638,9 +683,13 @@ export default function AdminPanel({ onLogout, settings, theme, isAdminViaPasswo
                         <p className="text-sm font-black text-slate-800 uppercase tracking-tight">{log.action}</p>
                         <p className="text-xs text-slate-500 font-medium">{log.details}</p>
                         <div className="flex items-center gap-2 mt-1">
-                          <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Admin: {log.adminEmail}</span>
+                          <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">
+                            Admin: {log.adminName ? `${log.adminName} (${log.adminEmail})` : log.adminEmail}
+                          </span>
                           {log.targetMemberId && (
-                            <span className="text-[8px] font-black text-turquoise uppercase tracking-widest bg-turquoise/5 px-1.5 py-0.5 rounded">ID Ahli: {log.targetMemberId}</span>
+                            <span className="text-[8px] font-black text-turquoise uppercase tracking-widest bg-turquoise/5 px-1.5 py-0.5 rounded">
+                              Ahli: {log.targetMemberName || log.targetMemberId}
+                            </span>
                           )}
                         </div>
                       </div>
@@ -782,7 +831,7 @@ export default function AdminPanel({ onLogout, settings, theme, isAdminViaPasswo
                         </div>
                         <div>
                           <h4 className="text-sm font-black text-red-800 uppercase tracking-tight">Sifar Semula Sistem</h4>
-                          <p className="text-[9px] font-black uppercase tracking-widest text-red-400">Padam semua ahli, log dan reset ID (Tindakan kekal)</p>
+                          <p className="text-[9px] font-black uppercase tracking-widest text-red-400">Padam semua ahli, akaun pengguna, log dan reset ID (Tindakan kekal)</p>
                         </div>
                       </div>
                       <button 
@@ -797,6 +846,44 @@ export default function AdminPanel({ onLogout, settings, theme, isAdminViaPasswo
               </div>
             </div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {userToDelete && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md" onClick={() => setUserToDelete(null)}>
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-[2rem] w-full max-w-sm shadow-2xl p-8 text-center"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="w-16 h-16 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center mx-auto mb-6">
+                <Trash2 className="w-8 h-8" />
+              </div>
+              <h3 className="text-xl font-black text-slate-800 mb-2">Padam Pengguna?</h3>
+              <p className="text-xs text-slate-500 font-medium mb-8">
+                Adakah anda pasti mahu memadam rekod profil untuk <span className="font-bold text-slate-800 uppercase">{userToDelete.email}</span>? 
+                Akaun Firebase Auth tidak akan dipadam melalui panel ini, hanya rekod data sahaja.
+              </p>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setUserToDelete(null)}
+                  className="flex-1 px-4 py-4 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl text-xs uppercase tracking-widest transition-all"
+                >
+                  Batal
+                </button>
+                <button 
+                  disabled={isDeletingUser}
+                  onClick={confirmDeleteUser}
+                  className="flex-1 px-4 py-4 bg-red-600 hover:bg-red-700 text-white font-black rounded-xl text-xs uppercase tracking-widest transition-all shadow-lg shadow-red-200"
+                >
+                  {isDeletingUser ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : "Ya, Padam"}
+                </button>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
 
@@ -867,7 +954,7 @@ export default function AdminPanel({ onLogout, settings, theme, isAdminViaPasswo
                   <div className="p-6 bg-red-50 rounded-2xl border-2 border-dashed border-red-200">
                     <p className="text-red-600 font-black text-lg animate-pulse mb-1">DATA AKAN DIPADAM</p>
                     <p className="text-[10px] text-red-400 font-black uppercase tracking-widest leading-relaxed">
-                      Ahli • Bayaran • Log • ID Ahli
+                      Ahli • Akaun Pengguna • Bayaran • Log • ID Ahli
                     </p>
                   </div>
                 )}
