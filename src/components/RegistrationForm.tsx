@@ -3,10 +3,20 @@ import { db, handleFirestoreError, OperationType, logActivity, auth, googleProvi
 import { collection, addDoc, serverTimestamp, runTransaction, doc, getDoc, query, where, getDocs, setDoc, updateDoc } from 'firebase/firestore';
 import { signInWithPopup, signInWithRedirect, getRedirectResult } from 'firebase/auth';
 import { motion, AnimatePresence } from 'motion/react';
-import { CheckCircle, Upload, Loader2, Info, LogIn, Mail, ArrowLeft, User, Lock, Eye, EyeOff } from 'lucide-react';
+import { CheckCircle, Upload, Loader2, Info, LogIn, Mail, ArrowLeft, User, Lock, Eye, EyeOff, Shield } from 'lucide-react';
 import { Member, MembershipType } from '../types';
 
-export default function RegistrationForm({ settings, theme }: { settings: any, theme: 'light' | 'dark' }) {
+export default function RegistrationForm({ 
+  settings, 
+  theme,
+  isAdmin = false,
+  adminRole = null
+}: { 
+  settings: any; 
+  theme: 'light' | 'dark';
+  isAdmin?: boolean;
+  adminRole?: 'super' | 'sub' | null;
+}) {
   const [currentUser, setCurrentUser] = useState(auth.currentUser);
   const [isEmailMode, setIsEmailMode] = useState(true);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
@@ -359,8 +369,8 @@ export default function RegistrationForm({ settings, theme }: { settings: any, t
           ...memberData,
           status: 'pending',
           createdAt: serverTimestamp(),
-          applicantUid: auth.currentUser?.uid,
-          applicantEmail: auth.currentUser?.email || '',
+          applicantUid: auth.currentUser?.uid || `admin_behalf_${adminRole || 'admin'}`,
+          applicantEmail: auth.currentUser?.email || `${adminRole || 'admin'}@nabaluathletics.com`,
         };
         const docRef = await addDoc(collection(db, 'members'), newMember);
         logActivity({
@@ -385,7 +395,7 @@ export default function RegistrationForm({ settings, theme }: { settings: any, t
     }
   };
 
-  if (!currentUser) {
+  if (!currentUser && !isAdmin) {
     return (
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
@@ -520,10 +530,17 @@ export default function RegistrationForm({ settings, theme }: { settings: any, t
           <p className="text-xs text-gray-400 mt-2 italic">Permohonan anda sedang diproses</p>
         </div>
         <button 
-          onClick={() => window.location.reload()}
+          onClick={() => {
+            if (isAdmin) {
+              setSuccessId(null);
+              resetForm();
+            } else {
+              window.location.reload();
+            }
+          }}
           className="w-full bg-turquoise hover:bg-turquoise-dark text-white font-bold py-4 rounded-xl transition-all shadow-lg hover:shadow-turquoise/30"
         >
-          {current.backHome}
+          {isAdmin ? "Daftar Permohonan Seterusnya" : current.backHome}
         </button>
       </motion.div>
     );
@@ -533,20 +550,33 @@ export default function RegistrationForm({ settings, theme }: { settings: any, t
     <div className="max-w-4xl mx-auto px-4 mt-8 pb-12 text-slate-800">
       <div className="bg-white/70 backdrop-blur-md p-4 rounded-3xl mb-8 flex flex-col md:flex-row items-center justify-between gap-4 border border-white/20">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl overflow-hidden shadow-lg border-2 border-white">
-            <img src={currentUser.photoURL || `https://ui-avatars.com/api/?name=${currentUser.displayName}`} alt="Profile" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+          <div className="w-10 h-10 rounded-xl overflow-hidden shadow-lg border-2 border-white bg-slate-50 flex items-center justify-center">
+            {currentUser ? (
+              <img src={currentUser.photoURL || `https://ui-avatars.com/api/?name=${currentUser.displayName || 'Ahli'}`} alt="Profile" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+            ) : (
+              <Shield className="w-5 h-5 text-turquoise" />
+            )}
           </div>
           <div>
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Berdaftar Sebagai</p>
-            <p className="text-sm font-bold text-slate-700 leading-none">{currentUser.displayName || currentUser.email}</p>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">
+              {isAdmin ? "Log Masuk Sebagai Admin" : "Berdaftar Sebagai"}
+            </p>
+            <p className="text-sm font-bold text-slate-700 leading-none">
+              {currentUser 
+                ? (currentUser.displayName || currentUser.email) 
+                : (adminRole === 'super' ? 'Super Admin (Sistem)' : 'Sub Admin (Sistem)')
+              }
+            </p>
           </div>
         </div>
-        <button 
-          onClick={() => auth.signOut()}
-          className="px-6 py-2 bg-slate-900/5 hover:bg-slate-900/10 text-slate-600 font-bold text-[10px] uppercase tracking-widest rounded-xl transition-all"
-        >
-          Tukar Akaun
-        </button>
+        {currentUser && (
+          <button 
+            onClick={() => auth.signOut()}
+            className="px-6 py-2 bg-slate-900/5 hover:bg-slate-900/10 text-slate-600 font-bold text-[10px] uppercase tracking-widest rounded-xl transition-all"
+          >
+            Tukar Akaun
+          </button>
+        )}
       </div>
 
       {/* Dynamic Multi-Application Panel */}

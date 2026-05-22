@@ -366,7 +366,14 @@ export default function App() {
                   onRegisterClick={() => setActiveTab('register')}
                 />
               )}
-              {activeTab === 'register' && <RegistrationForm settings={settings} theme={theme} />}
+              {activeTab === 'register' && (
+                <RegistrationForm 
+                  settings={settings} 
+                  theme={theme} 
+                  isAdmin={isAdminAuthenticated} 
+                  adminRole={adminRole} 
+                />
+              )}
               {activeTab === 'list' && <MemberList theme={theme} settings={settings} />}
             </motion.div>
           )}
