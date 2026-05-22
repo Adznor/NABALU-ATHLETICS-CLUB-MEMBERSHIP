@@ -285,6 +285,38 @@ export default function RegistrationForm({
 
     setFormData({ ...formData, icNumber: formattedIC, dob: newDOB, gender: newGender as any });
   };
+
+  const [icWarning, setIcWarning] = useState(false);
+  const [icCheckLoading, setIcCheckLoading] = useState(false);
+
+  useEffect(() => {
+    const checkICDuplication = async () => {
+      const ic = formData.icNumber;
+      if (ic && ic.length === 14) {
+        setIcCheckLoading(true);
+        try {
+          const q = query(collection(db, 'members'), where('icNumber', '==', ic));
+          const snap = await getDocs(q);
+          const hasDup = snap.docs.some(docSnap => docSnap.id !== existingMemberId);
+          setIcWarning(hasDup);
+        } catch (err) {
+          console.error("Error checking IC duplication:", err);
+          setIcWarning(false);
+        } finally {
+          setIcCheckLoading(false);
+        }
+      } else {
+        setIcWarning(false);
+      }
+    };
+
+    const delayDebounce = setTimeout(() => {
+      checkICDuplication();
+    }, 500);
+
+    return () => clearTimeout(delayDebounce);
+  }, [formData.icNumber, existingMemberId]);
+
   const [files, setFiles] = useState<{ photo?: File; receipt?: File }>({});
   const [previews, setPreviews] = useState<{ photo?: string; receipt?: string }>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -335,12 +367,13 @@ export default function RegistrationForm({
     setError(null);
 
     try {
-      if (!existingMemberId) {
-        // Check for duplicate IC only on new registrations
+      // Check for duplicate IC in system
+      if (formData.icNumber) {
         const q = query(collection(db, 'members'), where('icNumber', '==', formData.icNumber));
         const querySnapshot = await getDocs(q);
+        const isDuplicate = querySnapshot.docs.some(docSnap => docSnap.id !== existingMemberId);
         
-        if (!querySnapshot.empty) {
+        if (isDuplicate) {
           setError(current.duplicateIC);
           setIsSubmitting(false);
           return;
@@ -714,7 +747,20 @@ export default function RegistrationForm({
             </div>
             <div>
               <label className="label-bento">{current.icNumber}</label>
-              <input required type="text" className="input-bento" placeholder="000101-12-0000" value={formData.icNumber || ''} onChange={(e) => handleICChange(e.target.value.toUpperCase())} />
+              <div className="relative">
+                <input required type="text" className={`input-bento ${icWarning ? 'border-rose-300 bg-rose-50/10 focus:border-rose-500 focus:ring-rose-200' : ''}`} placeholder="000101-12-0000" value={formData.icNumber || ''} onChange={(e) => handleICChange(e.target.value.toUpperCase())} />
+                {icCheckLoading && (
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                    <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
+                  </div>
+                )}
+              </div>
+              {icWarning && (
+                <div className="mt-2 p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-[10px] font-semibold text-rose-600 flex items-center gap-2 uppercase tracking-wide">
+                  <Info className="w-4 h-4 flex-shrink-0 text-rose-500 animate-pulse" />
+                  <span>AMARAN: No. KP ini sudah didaftarkan dalam sistem!</span>
+                </div>
+              )}
             </div>
             <div>
               <label className="label-bento">{current.dob}</label>
