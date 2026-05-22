@@ -7,7 +7,7 @@ import React, { useState, useEffect } from 'react';
 import { db } from './lib/firebase';
 import { doc, getDoc, onSnapshot } from 'firebase/firestore';
 import { auth, googleProvider } from './lib/firebase';
-import { signInWithPopup, onAuthStateChanged, setPersistence, browserSessionPersistence } from 'firebase/auth';
+import { signInWithPopup, onAuthStateChanged, setPersistence, browserSessionPersistence, signInWithRedirect, getRedirectResult } from 'firebase/auth';
 import Navigation from './components/Navigation';
 import ClubInfo from './components/ClubInfo';
 import RegistrationForm from './components/RegistrationForm';
@@ -30,9 +30,24 @@ const SUPER_ADMIN_EMAIL = 'g-73273737@moe-dl.edu.my';
 export default function App() {
   const [activeTab, setActiveTab] = useState('info');
   const [isAdminMode, setIsAdminMode] = useState(false);
-  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
-  const [isAdminViaPassword, setIsAdminViaPassword] = useState(false);
-  const [adminRole, setAdminRole] = useState<'super' | 'sub' | null>(null);
+  const [isAdminViaPassword, setIsAdminViaPassword] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('isAdminViaPassword') === 'true';
+    }
+    return false;
+  });
+  const [adminRole, setAdminRole] = useState<'super' | 'sub' | null>(() => {
+    if (typeof window !== 'undefined') {
+      return (localStorage.getItem('adminRole') as 'super' | 'sub') || null;
+    }
+    return null;
+  });
+  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('isAdminAuthenticated') === 'true' || localStorage.getItem('isAdminViaPassword') === 'true';
+    }
+    return false;
+  });
   const [adminPasswordInput, setAdminPasswordInput] = useState('');
   const [showAdminPass, setShowAdminPass] = useState(false);
   const [settings, setSettings] = useState<ClubSettings>(DEFAULT_SETTINGS);
@@ -75,6 +90,38 @@ export default function App() {
       setLoading(false);
     });
 
+    getRedirectResult(auth).then(async (result) => {
+      if (result?.user) {
+        const user = result.user;
+        if (user.email === SUPER_ADMIN_EMAIL) {
+          setIsAdminAuthenticated(true);
+          setIsAdminViaPassword(false);
+          setAdminRole('super');
+          localStorage.setItem('isAdminAuthenticated', 'true');
+          localStorage.setItem('isAdminViaPassword', 'false');
+          localStorage.setItem('adminRole', 'super');
+        } else {
+          const userDoc = await getDoc(doc(db, 'users', user.uid));
+          if (userDoc.exists() && userDoc.data().role === 'sub_admin') {
+            setIsAdminAuthenticated(true);
+            setIsAdminViaPassword(false);
+            setAdminRole('sub');
+            localStorage.setItem('isAdminAuthenticated', 'true');
+            localStorage.setItem('isAdminViaPassword', 'false');
+            localStorage.setItem('adminRole', 'sub');
+          } else {
+            alert(`Akses dinafikan. Email anda (${user.email}) tidak mempunyai akses admin.`);
+            await auth.signOut();
+            setIsAdminAuthenticated(false);
+            setAdminRole(null);
+            localStorage.removeItem('isAdminAuthenticated');
+            localStorage.removeItem('isAdminViaPassword');
+            localStorage.removeItem('adminRole');
+          }
+        }
+      }
+    }).catch(console.error);
+
     const unsubAuth = onAuthStateChanged(auth, async (user) => {
       if (user) {
         // First check super admin email
@@ -82,6 +129,9 @@ export default function App() {
           setIsAdminAuthenticated(true);
           setIsAdminViaPassword(false);
           setAdminRole('super');
+          localStorage.setItem('isAdminAuthenticated', 'true');
+          localStorage.setItem('isAdminViaPassword', 'false');
+          localStorage.setItem('adminRole', 'super');
         } else {
           // Check for sub-admin role in Firestore
           try {
@@ -90,18 +140,36 @@ export default function App() {
               setIsAdminAuthenticated(true);
               setIsAdminViaPassword(false);
               setAdminRole('sub');
+              localStorage.setItem('isAdminAuthenticated', 'true');
+              localStorage.setItem('isAdminViaPassword', 'false');
+              localStorage.setItem('adminRole', 'sub');
             } else if (!isAdminViaPassword) {
               setIsAdminAuthenticated(false);
               setAdminRole(null);
+              localStorage.removeItem('isAdminAuthenticated');
+              localStorage.removeItem('isAdminViaPassword');
+              localStorage.removeItem('adminRole');
             }
           } catch (err) {
             console.error("Error checking admin role:", err);
-            if (!isAdminViaPassword) setIsAdminAuthenticated(false);
+            if (!isAdminViaPassword) {
+              setIsAdminAuthenticated(false);
+              localStorage.removeItem('isAdminAuthenticated');
+            }
           }
         }
       } else if (!isAdminViaPassword) {
         setIsAdminAuthenticated(false);
         setAdminRole(null);
+        localStorage.removeItem('isAdminAuthenticated');
+        localStorage.removeItem('isAdminViaPassword');
+        localStorage.removeItem('adminRole');
+      } else {
+        setIsAdminAuthenticated(true);
+        setAdminRole('super');
+        localStorage.setItem('isAdminAuthenticated', 'true');
+        localStorage.setItem('isAdminViaPassword', 'true');
+        localStorage.setItem('adminRole', 'super');
       }
     });
 
@@ -116,23 +184,37 @@ export default function App() {
       // Force account selection to avoid automatic login with wrong account
       googleProvider.setCustomParameters({ prompt: 'select_account' });
       
-      const result = await signInWithPopup(auth, googleProvider);
-      const user = result.user;
-      
-      if (user.email === SUPER_ADMIN_EMAIL) {
-        setIsAdminAuthenticated(true);
-        setAdminRole('super');
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      if (isMobile) {
+        await signInWithRedirect(auth, googleProvider);
       } else {
-        // Check for sub-admin role in Firestore
-        const userDoc = await getDoc(doc(db, 'users', user.uid));
-        if (userDoc.exists() && userDoc.data().role === 'sub_admin') {
+        const result = await signInWithPopup(auth, googleProvider);
+        const user = result.user;
+        
+        if (user.email === SUPER_ADMIN_EMAIL) {
           setIsAdminAuthenticated(true);
-          setAdminRole('sub');
+          setAdminRole('super');
+          localStorage.setItem('isAdminAuthenticated', 'true');
+          localStorage.setItem('isAdminViaPassword', 'false');
+          localStorage.setItem('adminRole', 'super');
         } else {
-          alert(`Akses dinafikan. Email anda (${user.email}) tidak mempunyai akses admin.`);
-          await auth.signOut(); // Ensure we sign out the wrong account
-          setIsAdminAuthenticated(false);
-          setAdminRole(null);
+          // Check for sub-admin role in Firestore
+          const userDoc = await getDoc(doc(db, 'users', user.uid));
+          if (userDoc.exists() && userDoc.data().role === 'sub_admin') {
+            setIsAdminAuthenticated(true);
+            setAdminRole('sub');
+            localStorage.setItem('isAdminAuthenticated', 'true');
+            localStorage.setItem('isAdminViaPassword', 'false');
+            localStorage.setItem('adminRole', 'sub');
+          } else {
+            alert(`Akses dinafikan. Email anda (${user.email}) tidak mempunyai akses admin.`);
+            await auth.signOut(); // Ensure we sign out the wrong account
+            setIsAdminAuthenticated(false);
+            setAdminRole(null);
+            localStorage.removeItem('isAdminAuthenticated');
+            localStorage.removeItem('isAdminViaPassword');
+            localStorage.removeItem('adminRole');
+          }
         }
       }
     } catch (err: any) {
@@ -151,6 +233,9 @@ export default function App() {
       setIsAdminViaPassword(true);
       setIsAdminAuthenticated(true);
       setAdminRole('super');
+      localStorage.setItem('isAdminAuthenticated', 'true');
+      localStorage.setItem('isAdminViaPassword', 'true');
+      localStorage.setItem('adminRole', 'super');
       setAdminPasswordInput('');
     } else {
       alert("Kata laluan admin salah.");
@@ -163,6 +248,9 @@ export default function App() {
     setIsAdminAuthenticated(false);
     setIsAdminMode(false);
     setAdminRole(null);
+    localStorage.removeItem('isAdminAuthenticated');
+    localStorage.removeItem('isAdminViaPassword');
+    localStorage.removeItem('adminRole');
   };
 
   if (loading) {

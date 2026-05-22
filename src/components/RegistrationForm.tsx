@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { db, handleFirestoreError, OperationType, logActivity, auth, googleProvider, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile } from '../lib/firebase';
 import { collection, addDoc, serverTimestamp, runTransaction, doc, getDoc, query, where, getDocs, setDoc, updateDoc } from 'firebase/firestore';
-import { signInWithPopup } from 'firebase/auth';
+import { signInWithPopup, signInWithRedirect, getRedirectResult } from 'firebase/auth';
 import { motion, AnimatePresence } from 'motion/react';
 import { CheckCircle, Upload, Loader2, Info, LogIn, Mail, ArrowLeft, User, Lock, Eye, EyeOff } from 'lucide-react';
 import { Member, MembershipType } from '../types';
 
 export default function RegistrationForm({ settings, theme }: { settings: any, theme: 'light' | 'dark' }) {
   const [currentUser, setCurrentUser] = useState(auth.currentUser);
-  const [isEmailMode, setIsEmailMode] = useState(false);
+  const [isEmailMode, setIsEmailMode] = useState(true);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
@@ -17,8 +17,16 @@ export default function RegistrationForm({ settings, theme }: { settings: any, t
   const [isAuthLoading, setIsAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [existingMemberId, setExistingMemberId] = useState<string | null>(null);
+  const [userApplications, setUserApplications] = useState<Member[]>([]);
 
   useEffect(() => {
+    getRedirectResult(auth).then((result) => {
+      if (result?.user) {
+        saveUserToFirestore(result.user);
+        checkExistingMembership(result.user.uid);
+      }
+    }).catch(console.error);
+
     const unsubscribe = auth.onAuthStateChanged((user) => {
       setCurrentUser(user);
       if (user) {
@@ -26,23 +34,67 @@ export default function RegistrationForm({ settings, theme }: { settings: any, t
         checkExistingMembership(user.uid);
       } else {
         setExistingMemberId(null);
+        setUserApplications([]);
       }
     });
     return () => unsubscribe();
   }, []);
 
+  const loadApplication = (app: Member) => {
+    setExistingMemberId(app.id || null);
+    setFormData(app);
+    setMembershipType(app.membershipType);
+    setPreviews({
+      photo: app.photoBase64 || undefined,
+      receipt: app.receiptBase64 || undefined,
+    });
+    setFiles({ photo: undefined, receipt: undefined });
+    setAcceptedTerms(true);
+    setError(null);
+  };
+
+  const resetForm = () => {
+    setExistingMemberId(null);
+    setFormData({
+      gender: 'Lelaki',
+      membershipType: 'Ahli Individu',
+      status: 'pending',
+      dob: '',
+      phone: '',
+      email: '',
+      address: '',
+      icNumber: '',
+      fullName: '',
+      guardianName: '',
+      guardianPhone: '',
+      guardianIc: '',
+      registrationFeePaid: false,
+      annualPayments: [],
+    });
+    setMembershipType('Ahli Individu');
+    setPreviews({ photo: undefined, receipt: undefined });
+    setFiles({ photo: undefined, receipt: undefined });
+    setAcceptedTerms(false);
+    setError(null);
+  };
+
   const checkExistingMembership = async (uid: string) => {
     try {
       const q = query(collection(db, 'members'), where('applicantUid', '==', uid));
       const snap = await getDocs(q);
-      if (!snap.empty) {
-        const docSnap = snap.docs[0];
+      const list: Member[] = [];
+      snap.forEach(docSnap => {
         const data = docSnap.data() as Member;
-        setExistingMemberId(docSnap.id);
-        setFormData(data);
-        setMembershipType(data.membershipType);
-        if (data.photoBase64) setPreviews(prev => ({ ...prev, photo: data.photoBase64 }));
-        if (data.receiptBase64) setPreviews(prev => ({ ...prev, receipt: data.receiptBase64 }));
+        list.push({ ...data, id: docSnap.id });
+      });
+      setUserApplications(list);
+      if (list.length > 0 && !existingMemberId) {
+        // Load the first application as a default edit target, but they can reset to apply again
+        const app = list[0];
+        setExistingMemberId(app.id || null);
+        setFormData(app);
+        setMembershipType(app.membershipType);
+        setPreviews({ photo: app.photoBase64 || undefined, receipt: app.receiptBase64 || undefined });
         setAcceptedTerms(true);
       }
     } catch (err) {
@@ -248,10 +300,15 @@ export default function RegistrationForm({ settings, theme }: { settings: any, t
 
   const handleLogin = async () => {
     try {
-      await signInWithPopup(auth, googleProvider);
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      if (isMobile) {
+        await signInWithRedirect(auth, googleProvider);
+      } else {
+        await signInWithPopup(auth, googleProvider);
+      }
     } catch (err) {
       console.error("Login failed:", err);
-      alert("Gagal log masuk. Sila cuba lagi.");
+      alert("Gagal log masuk atau popup disekat. Sila cuba lagi.");
     }
   };
 
@@ -315,7 +372,10 @@ export default function RegistrationForm({ settings, theme }: { settings: any, t
         });
       }
 
-      setSuccessId(existingMemberId ? 'UPDATED' : 'PENDING'); 
+      if (auth.currentUser) {
+        await checkExistingMembership(auth.currentUser.uid);
+      }
+      setSuccessId(existingMemberId ? 'UPDATED' : 'PENDING');
       window.scrollTo(0, 0);
     } catch (err: any) {
       handleFirestoreError(err, OperationType.WRITE, 'members');
@@ -330,144 +390,111 @@ export default function RegistrationForm({ settings, theme }: { settings: any, t
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className={`max-w-md mx-auto ${theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100'} p-8 md:p-12 rounded-[2.5rem] shadow-2xl border mt-12`}
+        className={`max-w-md mx-auto ${theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100'} p-8 md:p-12 rounded-[2.5rem] shadow-2xl border mt-12 text-slate-800`}
       >
-        <AnimatePresence mode="wait">
-          {!isEmailMode ? (
-            <motion.div 
-              key="google-mode"
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 20 }}
-              className="text-center"
-            >
-              <div className={`w-20 h-20 ${theme === 'dark' ? 'bg-turquoise/5' : 'bg-turquoise/10'} flex items-center justify-center rounded-3xl mx-auto mb-8`}>
-                <LogIn className="w-10 h-10 text-turquoise" />
-              </div>
-              <h2 className={`text-3xl font-black ${theme === 'dark' ? 'text-slate-100' : 'text-slate-800'} mb-4 tracking-tight`}>{current.loginTitle}</h2>
-              <p className={`${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'} font-medium text-sm leading-relaxed mb-10`}>
-                {current.loginDesc}
-              </p>
-              <button 
-                onClick={handleLogin}
-                className={`w-full py-4 ${theme === 'dark' ? 'bg-white text-slate-900' : 'bg-slate-900 text-white'} font-black rounded-2xl flex items-center justify-center gap-3 transition-all active:scale-[0.98] shadow-xl mb-6`}
-              >
-                <svg className="w-5 h-5" viewBox="0 0 24 24">
-                  <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                  <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                  <path fill="currentColor" d="M5.84 14.1c-.22-.66-.35-1.36-.35-2.1s.13-1.44.35-2.1V7.06H2.18c-.74 1.48-1.18 3.14-1.18 4.94s.44 3.46 1.18 4.94l3.66-2.84z"/>
-                  <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
-                </svg>
-                {current.loginBtn}
-              </button>
+        <div className={`w-16 h-16 ${theme === 'dark' ? 'bg-slate-100 text-slate-900' : 'bg-slate-900 text-white'} flex items-center justify-center rounded-2xl mb-6`}>
+          <Mail className="w-8 h-8" />
+        </div>
+        <h2 className={`text-2xl font-black ${theme === 'dark' ? 'text-white' : 'text-slate-800'} mb-6 tracking-tight`}>
+          {authMode === 'register' ? current.registerTitle : current.loginEmailTitle}
+        </h2>
 
-              <button 
-                onClick={() => setIsEmailMode(true)}
-                className="text-[10px] font-black text-turquoise uppercase tracking-widest hover:underline"
-              >
-                {current.loginEmailBtn}
-              </button>
-            </motion.div>
-          ) : (
-            <motion.div 
-              key="email-mode"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-            >
-              <button 
-                onClick={() => { setIsEmailMode(false); setAuthError(null); }}
-                className="mb-8 flex items-center gap-2 text-slate-400 font-bold text-[10px] uppercase tracking-widest hover:text-slate-600 transition-colors"
-              >
-                <ArrowLeft className="w-3 h-3" /> Kembali ke Google
-              </button>
-
-              <div className={`w-16 h-16 ${theme === 'dark' ? 'bg-slate-100 text-slate-900' : 'bg-slate-900 text-white'} flex items-center justify-center rounded-2xl mb-6`}>
-                <Mail className="w-8 h-8" />
-              </div>
-              <h2 className={`text-2xl font-black ${theme === 'dark' ? 'text-white' : 'text-slate-800'} mb-6 tracking-tight`}>
-                {authMode === 'register' ? current.registerTitle : current.loginEmailTitle}
-              </h2>
-
-              <form onSubmit={handleEmailAuth} className="space-y-4">
-                {authMode === 'register' && (
-                  <div className="space-y-2">
-                    <label className="label-bento flex items-center gap-2">
-                       <User className="w-3 h-3" /> {current.nameLabel}
-                    </label>
-                    <input 
-                      required 
-                      type="text" 
-                      className={`input-bento ${theme === 'dark' ? 'bg-slate-800 border-slate-700 text-white' : ''}`} 
-                      value={authName} 
-                      onChange={(e) => setAuthName(e.target.value)} 
-                    />
-                  </div>
-                )}
-                <div className="space-y-2">
-                  <label className="label-bento flex items-center gap-2">
-                    <Mail className="w-3 h-3" /> {current.emailLabel}
-                  </label>
-                  <input 
-                    required 
-                    type="email" 
-                    className={`input-bento ${theme === 'dark' ? 'bg-slate-800 border-slate-700 text-white' : ''}`} 
-                    value={authEmail} 
-                    onChange={(e) => setAuthEmail(e.target.value)} 
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="label-bento flex items-center gap-2">
-                    <Lock className="w-3 h-3" /> {current.passwordLabel}
-                  </label>
-                  <div className="relative">
-                    <input 
-                      required 
-                      type={showPassword ? "text" : "password"} 
-                      className={`input-bento pr-12 ${theme === 'dark' ? 'bg-slate-800 border-slate-700 text-white' : ''}`} 
-                      value={authPassword} 
-                      onChange={(e) => setAuthPassword(e.target.value)} 
-                      minLength={6}
-                    />
-                    <button 
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-turquoise transition-colors"
-                    >
-                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                  {authError && (
-                    <div className="p-3 bg-red-50 border border-red-100 rounded-xl text-[10px] font-bold text-red-500 uppercase tracking-tight">
-                      {authError}
-                    </div>
-                  )}
-
-                  <button 
-                    disabled={isAuthLoading}
-                    className="w-full py-4 bg-turquoise hover:bg-turquoise-dark text-white font-black rounded-2xl flex items-center justify-center gap-3 transition-all active:scale-[0.98] shadow-xl shadow-turquoise/20 mt-4 h-[56px]"
-                  >
-                    {isAuthLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : (authMode === 'register' ? current.registerBtn : current.loginEmailTitle)}
-                  </button>
-
-                  <div className="text-center pt-4">
-                    <button 
-                      type="button"
-                      onClick={() => {
-                        setAuthMode(authMode === 'login' ? 'register' : 'login');
-                        setAuthError(null);
-                      }}
-                      className={`text-[10px] font-black ${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'} uppercase tracking-widest hover:text-turquoise transition-colors`}
-                    >
-                      {authMode === 'login' ? current.noAccount : current.hasAccount}
-                    </button>
-                  </div>
-                </form>
-            </motion.div>
+        <form onSubmit={handleEmailAuth} className="space-y-4">
+          {authMode === 'register' && (
+            <div className="space-y-2">
+              <label className="label-bento flex items-center gap-2">
+                 <User className="w-3 h-3" /> {current.nameLabel}
+              </label>
+              <input 
+                required 
+                type="text" 
+                className={`input-bento text-slate-900 ${theme === 'dark' ? 'bg-slate-800 border-slate-700 text-white' : ''}`} 
+                value={authName} 
+                onChange={(e) => setAuthName(e.target.value)} 
+              />
+            </div>
           )}
-        </AnimatePresence>
+          <div className="space-y-2">
+            <label className="label-bento flex items-center gap-2">
+              <Mail className="w-3 h-3" /> {current.emailLabel}
+            </label>
+            <input 
+              required 
+              type="email" 
+              className={`input-bento text-slate-900 ${theme === 'dark' ? 'bg-slate-800 border-slate-700 text-white' : ''}`} 
+              value={authEmail} 
+              onChange={(e) => setAuthEmail(e.target.value)} 
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="label-bento flex items-center gap-2">
+              <Lock className="w-3 h-3" /> {current.passwordLabel}
+            </label>
+            <div className="relative">
+              <input 
+                required 
+                type={showPassword ? "text" : "password"} 
+                className={`input-bento text-slate-900 pr-12 ${theme === 'dark' ? 'bg-slate-800 border-slate-700 text-white' : ''}`} 
+                value={authPassword} 
+                onChange={(e) => setAuthPassword(e.target.value)} 
+                minLength={6}
+              />
+              <button 
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-turquoise transition-colors"
+              >
+                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+
+          {authError && (
+            <div className="p-3 bg-red-50 border border-red-100 rounded-xl text-[10px] font-bold text-red-500 uppercase tracking-tight">
+              {authError}
+            </div>
+          )}
+
+          <button 
+            disabled={isAuthLoading}
+            className="w-full py-4 bg-turquoise hover:bg-turquoise-dark text-white font-black rounded-2xl flex items-center justify-center gap-3 transition-all active:scale-[0.98] shadow-xl shadow-turquoise/20 mt-4 h-[56px]"
+          >
+            {isAuthLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : (authMode === 'register' ? current.registerBtn : current.loginEmailTitle)}
+          </button>
+
+          <div className="text-center pt-4">
+            <button 
+              type="button"
+              onClick={() => {
+                setAuthMode(authMode === 'login' ? 'register' : 'login');
+                setAuthError(null);
+              }}
+              className={`text-[10px] font-black ${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'} uppercase tracking-widest hover:text-turquoise transition-colors`}
+            >
+              {authMode === 'login' ? current.noAccount : current.hasAccount}
+            </button>
+          </div>
+        </form>
+
+        <div className="relative flex py-5 items-center">
+          <div className={`flex-grow border-t ${theme === 'dark' ? 'border-slate-800' : 'border-slate-200'}`}></div>
+          <span className="flex-shrink mx-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Atau</span>
+          <div className={`flex-grow border-t ${theme === 'dark' ? 'border-slate-800' : 'border-slate-200'}`}></div>
+        </div>
+
+        <button 
+          onClick={handleLogin}
+          type="button"
+          className={`w-full py-4 ${theme === 'dark' ? 'bg-white text-slate-900 hover:bg-white/95' : 'bg-slate-900 text-white hover:bg-slate-800'} font-black rounded-2xl flex items-center justify-center gap-3 transition-all active:scale-[0.98] shadow-xl`}
+        >
+          <svg className="w-5 h-5" viewBox="0 0 24 24">
+            <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+            <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+            <path fill="currentColor" d="M5.84 14.1c-.22-.66-.35-1.36-.35-2.1s.13-1.44.35-2.1V7.06H2.18c-.74 1.48-1.18 3.14-1.18 4.94s.44 3.46 1.18 4.94l3.66-2.84z"/>
+            <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+          </svg>
+          {current.loginBtn}
+        </button>
       </motion.div>
     );
   }
@@ -521,6 +548,67 @@ export default function RegistrationForm({ settings, theme }: { settings: any, t
           Tukar Akaun
         </button>
       </div>
+
+      {/* Dynamic Multi-Application Panel */}
+      <div className="bg-white/90 shadow-lg rounded-[2rem] p-6 mb-8 border border-slate-100">
+        <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest mb-4 flex items-center gap-2">
+          <span className="w-2.5 h-2.5 rounded-full bg-turquoise animate-pulse"></span>
+          Senarai Rekod Permohonan Anda ({userApplications.length})
+        </h3>
+        {userApplications.length === 0 ? (
+          <p className="text-xs text-slate-400 font-bold italic">Tiada permohonan keahlian yang dijumpai untuk akaun ini. Sila isi borang di bawah untuk memulakan.</p>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+            {userApplications.map((app) => {
+              const isActive = existingMemberId === app.id;
+              let statusBadgeColor = 'bg-yellow-50 text-yellow-600 border-yellow-200';
+              if (app.status === 'approved') statusBadgeColor = 'bg-emerald-50 text-emerald-600 border-emerald-200';
+              if (app.status === 'rejected') statusBadgeColor = 'bg-rose-50 text-rose-600 border-rose-200';
+
+              return (
+                <button
+                  key={app.id}
+                  onClick={() => loadApplication(app)}
+                  type="button"
+                  className={`p-4 rounded-2xl border-2 text-left transition-all relative flex flex-col justify-between gap-1 ${
+                    isActive 
+                      ? 'border-turquoise bg-turquoise/5 shadow-inner' 
+                      : 'border-slate-100 hover:border-slate-200 bg-slate-50/50'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-black text-slate-800 truncate">{app.fullName || 'Permohonan Tanpa Nama'}</span>
+                    <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full border ${statusBadgeColor}`}>
+                      {app.status === 'approved' ? 'Lulus' : app.status === 'rejected' ? 'Ditolak' : 'Proses'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-[10px] text-slate-400 font-bold mt-2">
+                    <span>{app.membershipType}</span>
+                    <span className="font-mono">{app.icNumber}</span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+        
+        {userApplications.length > 0 && (
+          <div className="flex justify-end pt-2 border-t border-slate-100">
+            <button
+              onClick={resetForm}
+              type="button"
+              className={`px-4 py-2 text-xs font-black rounded-xl transition-all ${
+                existingMemberId === null 
+                  ? 'bg-turquoise text-white shadow-md' 
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              + Daftar Keahlian Baharu
+            </button>
+          </div>
+        )}
+      </div>
+
       <div className="mb-12">
         <h2 className="text-4xl font-black text-slate-800 tracking-tighter italic">{existingMemberId ? 'Kemaskini Permohonan' : current.title}</h2>
         <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest">{current.clubName}</p>
